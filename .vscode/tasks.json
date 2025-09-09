@@ -3,10 +3,10 @@
 	"tasks": [
 		{
 			"type": "npm",
+			"label": "npm: build",
 			"script": "compile",
 			"group": "build",
 			"problemMatcher": "$tsc-watch",
-			"label": "compile vscode_utils",
 			"detail": "tsc"
 		},
 		{
@@ -17,7 +17,7 @@
 				"command": "git add . & npm version ${input:version} --force",
 			},
 			"problemMatcher": [],
-			"dependsOn": "compile vscode_utils"
+			"dependsOn": "npm: build"
 		},
 		{
 			"type": "shell",
@@ -26,6 +26,14 @@
 			"problemMatcher": [],
 			"dependsOn": "prepublish"
 		},
+		{
+			"type": "shell",
+			"label": "PACKAGE",
+			"command": "npm pack",
+			"problemMatcher": [],
+			"dependsOn": "npm: build"
+		},
+
 	],
 	"inputs": [
 		{

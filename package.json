@@ -1,37 +1,41 @@
 {
-  "name": "@isopodlabs/vscode_utils",
-  "version": "0.2.3",
-  "description": "vscode utilities",
-  "exports": {
-    "./fs": "./dist/fs.js",
-    "./debug": "./dist/debug.js",
-    "./icon-theme": "./dist/icon-theme.js",
-    "./jsx-runtime": "./dist/jsx-runtime.js",
-    "./webview": "./dist/webview/shared.js"
-  },
-  "files": [
-    "dist",
-    "assets",
-    "README.md"
-  ],
-  "scripts": {
-    "compile": "tsc -b",
-    "test": "echo \"No tests specified\" && exit 0"
-  },
-  "keywords": [
-    "vscode",
-    "typescript"
-  ],
-  "author": "Adrian Stephens",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^22.13.8",
-    "@vscode/debugprotocol": "^1.68.0",
-    "eslint": "^9.21.0",
-    "typescript": "^5.8.2",
-    "typescript-eslint": "^8.26.0"
-  },
-  "dependencies": {
-    "@types/vscode": "^1.98.0"
-  }
+	"name": "@isopodlabs/vscode_utils",
+	"version": "0.2.3",
+	"description": "vscode utilities",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/adrianstephens/vscode-utils.git"
+	},
+	"exports": {
+		"./fs": "./dist/fs.js",
+		"./debug": "./dist/debug.js",
+		"./icon-theme": "./dist/icon-theme.js",
+		"./jsx-runtime": "./dist/jsx-runtime.js",
+		"./webview": "./dist/webview/shared.js"
+	},
+	"files": [
+		"dist/**/*.{js,d.ts}",
+		"assets",
+		"README.md"
+	],
+	"scripts": {
+		"compile": "tsc -b",
+		"test": "echo \"No tests specified\" && exit 0"
+	},
+	"keywords": [
+		"vscode",
+		"typescript"
+	],
+	"author": "Adrian Stephens",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^22.13.8",
+		"@vscode/debugprotocol": "^1.68.0",
+		"eslint": "^9.21.0",
+		"typescript": "^5.8.2",
+		"typescript-eslint": "^8.26.0"
+	},
+	"dependencies": {
+		"@types/vscode": "^1.98.0"
+	}
 }
