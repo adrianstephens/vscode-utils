@@ -18,6 +18,7 @@
 			},
 			"problemMatcher": [],
 			"dependsOn": "npm: build"
+			"dependsOn": "npm: build"
 		},
 		{
 			"type": "shell",

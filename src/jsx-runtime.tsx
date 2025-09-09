@@ -588,7 +588,8 @@ export function Label({id, display}: {id: string, display: string}) {
 
 export class Hash {
 	constructor(public algorithm: string, public value: string) {}
-	toString() { return `'${this.algorithm}-${this.value}'`; }
+	toString() { return this.value; }
+	toValue() { return `'${this.algorithm}-${this.value}'`; }
 }
 
 export function Nonce() {
@@ -596,23 +597,47 @@ export function Nonce() {
 	return new Hash('nonce', Array.from({length: 32}, () => possible.charAt(Math.floor(Math.random() * possible.length))).join(''));
 }
 
-type Source = Hash
-	| string
-	|"'self'"
-	|"'unsafe-inline'"
-	|"'unsafe-eval'"
-	|"'wasm-unsafe-eval'"
-	|"'unsafe-hashes'"
-	|"'inline-speculation-rules'"
-	|"'strict-dynamic'";
+const CSPkeywords = {
+	self:						"'self'",
+	unsafe_inline:				"'unsafe-inline'",
+	unsafe_eval:				"'unsafe-eval'",
+	wasm_unsafe_eval:			"'wasm-unsafe-eval'",
+	unsafe_hashes:				"'unsafe-hashes'",
+	inline_speculation_rules:	"'inline-speculation-rules'",
+	strict_dynamic:				"'strict-dynamic'",
+} as const;
 
-export function CSP({csp, ...others}: {csp: string, script?: Source, script_elem?: Source, script_attr?: Source, style?: Source, stype_elem?: Source, style_attr?: Source, font?: Source, img?: Source, media?: Source}) {
-	return <meta http-equiv="Content-Security-Policy" content={`
-		default-src ${csp};
-		${Object.entries(others).map(([k, v]) => `${k}-src ${v};`)}
-	`}/>;
+type CSPSource = Hash
+	|vscode.Uri
+	|(typeof CSPkeywords)[keyof typeof CSPkeywords]
+	|CSPSource[];
+
+export function CSPdefault(extension: vscode.Uri): CSPSource {
+	const result: CSPSource[] = [CSP.self, vscode.Uri.parse('https://*.vscode-cdn.net')];
+	if (extension.scheme === 'https' || extension.scheme === 'http')
+		result.push(extension);	// if the extension is being served up from a CDN also include the CDN in the default csp
+	return result;
 }
 
-export function ImportMap(props: {map: Record<string, vscode.Uri>, webview: vscode.Webview}) {
-	return <script type="importmap">{`{ "imports": { ${Object.entries(props.map).map(([k, v]) => `"${k}": "${props.webview.asWebviewUri(v)}"`).join(',')} } }`}</script>;
+function CSPFunction({csp, ...others}: {csp: string, script?: CSPSource, script_elem?: CSPSource, script_attr?: CSPSource, style?: CSPSource, stype_elem?: CSPSource, style_attr?: CSPSource, font?: CSPSource, img?: CSPSource, media?: CSPSource}) {
+	const key = (k: string): string => k.indexOf('_') >= 0
+		? k.replaceAll('_', '-src-')
+		: k + "-src";
+	const val = (v: CSPSource): string => 
+		  v instanceof Array ? v.map(v => val(v)).join(' ')
+		: v instanceof vscode.Uri ? v.toString(true)
+		: v instanceof Hash ? v.toValue()
+		: /*typeof v === 'string' ? `'${v}` :*/ v.toString();
+
+	return <meta http-equiv="Content-Security-Policy" content={
+		`default-src ${csp}; ${Object.entries(others).map(([k, v]) => `${key(k)} ${val(v)};`).join('')}`
+	}/>;
+}
+
+export const CSP = Object.assign(CSPFunction, CSPkeywords);
+
+export function ImportMap(props: {map: Record<string, vscode.Uri>, webview: vscode.Webview, nonce?: Hash}) {
+	return <script type="importmap" nonce={props.nonce?.value}>{
+		`{ "imports": { ${Object.entries(props.map).map(([k, v]) => `"${k}": "${props.webview.asWebviewUri(v)}"`).join(',')} } }`
+	}</script>;
 }

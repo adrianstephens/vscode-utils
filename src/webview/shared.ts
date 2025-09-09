@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 
-console.log("Hello from shared.ts!");
+//console.log("Hello from shared.ts!");
 
 declare function acquireVsCodeApi(): {
     postMessage: (message: any) => void;
@@ -11,37 +11,41 @@ declare function acquireVsCodeApi(): {
 
 export const vscode		= acquireVsCodeApi();
 
-//fix up icons in attributes
-document.querySelectorAll('[icon]').forEach(element => {
-	const value = element.getAttribute('icon');
-	if (value && value.includes('/')) {
-		element.removeAttribute('icon');
-		element.classList.add('icon');
-		(element as HTMLElement).style.setProperty('--icon', `url(${value})`);
-	}
-	const col = element.getAttribute('color');
-	if (col) {
-		element.removeAttribute('color');
-		(element as HTMLElement).style.setProperty('--icon-color', col);
-	}
-});
-
-
-document.querySelectorAll('.select').forEach(item => {
-	item.addEventListener('click', event => {
-		if (event.target === item) {
-			vscode.postMessage({
-				command: 'select',
-				selector: generateSelector(item),
-				text: item.textContent,
-				...(item as HTMLElement).dataset
-			});
-			event.stopPropagation();
+export function fixupElements(root: ParentNode) {
+	//fix up icons in attributes
+	root.querySelectorAll('[icon]').forEach(element => {
+		const value = element.getAttribute('icon');
+		if (value && value.includes('/')) {
+			element.removeAttribute('icon');
+			element.classList.add('icon');
+			(element as HTMLElement).style.setProperty('--icon', `url(${value})`);
+		}
+		const col = element.getAttribute('color');
+		if (col) {
+			element.removeAttribute('color');
+			(element as HTMLElement).style.setProperty('--icon-color', col);
 		}
 	});
-});
 
-export function createElement<K extends keyof HTMLElementTagNameMap>(tag: K, options: Record<string, unknown>): HTMLElement {
+	//class 'select'
+	root.querySelectorAll('.select').forEach(item => {
+		item.addEventListener('click', event => {
+			if (event.target === item) {
+				vscode.postMessage({
+					command: 'select',
+					selector: generateSelector(item),
+					text: item.textContent,
+					...(item as HTMLElement).dataset
+				});
+				event.stopPropagation();
+			}
+		});
+	});
+}
+
+fixupElements(document);
+
+export function createElement<K extends keyof HTMLElementTagNameMap>(tag: K, options?: Record<string, unknown>): HTMLElementTagNameMap[K] {
 	const e = document.createElement(tag);
 	if (options) {
 		for (const [k,v] of Object.entries(options))
@@ -61,6 +65,501 @@ export function getFirstText(element: Element) {
 		}
 	}
 }
+
+export function debounce(func: (...args: any[])=>void, wait: number) {
+	let timeout: number | undefined;
+	return (...args: any[]) => {
+		window.clearTimeout(timeout);
+		timeout = window.setTimeout(() => {
+			timeout = undefined;
+			func(...args);
+		}, wait);
+	};
+}
+
+
+//-------------------------------------
+// Style
+//-------------------------------------
+
+interface Position<T> {
+	x:				T;
+	y:				T;
+}
+
+interface Size<T> {
+	width:			T;
+	height:			T;
+}
+
+interface Edges<T> {
+	left: 			T;
+	right: 			T;
+	top: 			T;
+	bottom: 		T;
+}
+
+interface Corners<T> {
+	topLeft: 		T;
+	topRight: 		T;
+	bottomLeft: 	T;
+	bottomRight: 	T;
+}
+
+interface WidthStyleColor<T> {
+	width: 			T;
+	style: 			T;
+	color: 			T;
+}
+
+interface Animation {
+    composition: 	string;
+    delay: 			string;
+    direction: 		string;
+    duration: 		string;
+    fillMode: 		string;
+    iterationCount: string;
+    name: 			string;
+    playState: 		string;
+    timingFunction: string;
+}
+
+interface Background {
+	attachment: string;
+	clip: 		string;
+	color: 		string;
+	image: 		string;
+	origin: 	string;
+	position: 	string;
+	repeat: 	string;
+	size: 		string;
+	blendMode: 	string;
+}
+
+interface Border extends WidthStyleColor<Edges<string>> {
+	radius: 	Corners<string>;
+
+	collapse:	string;
+	spacing:	string;
+
+	image: {
+		outset: string;
+		repeat: string;
+		slice: 	string;
+		source: string;
+		width: 	string;
+	}
+}
+
+interface Font {
+	family: 		string;
+	size: 			string;
+	style: 			string;
+	weight: 		string;
+	lineHeight: 	string;
+
+	featureSettings: 	string;
+	variationSettings: 	string;
+	kerning: 			string;
+	opticalSizing: 		string;
+	palette: 			string;
+	sizeAdjust: 		string;
+
+	variant: {
+		alternates: string;
+		caps: 		string;
+		eastAsian: 	string;
+		ligatures: 	string;
+		numeric: 	string;
+		position: 	string;
+	}
+
+	synthesis: {
+		weight: 	string;
+		style: 		string;
+		smallCaps: 	string;
+	}
+}
+
+interface Grid {
+	autoColumns: 		string;
+	autoFlow: 			string;
+	autoRows: 			string;
+	templateAreas: 		string;
+	templateColumns: 	string;
+	templateRows: 		string;
+
+	//area: string;
+	rowStart: 			string;
+	rowEnd: 			string;
+	columnStart: 		string;
+	columnEnd: 			string;
+}
+ 
+interface Style extends Position<string>, Size<string>, Edges<string> {
+	color: string;
+
+	accentColor: string;
+
+	align: {
+		content: 	string;
+		items: 		string;
+		self: 		string;
+	}
+	justify: {
+		content: 	string;
+		items: 		string;
+		self: 		string;
+	}
+
+
+	animation: Animation;
+
+	appearance: string;
+	aspectRatio: string;
+	backdropFilter: string;
+	backfaceVisibility: string;
+
+	background: Background;
+
+	baseline: {
+		align:	string;
+		shift:	string;
+		source:	string;
+	}
+
+	border: Border;
+
+	boxDecorationBreak: string;
+	boxShadow: string;
+	boxSizing: string;
+
+	break: {
+		after: string;
+		before: string;
+		inside: string;
+	}
+
+	captionSide: string;
+	caretColor: string;
+	clear: string;
+
+	colorScheme: string;
+
+	columns: {
+		width: string;
+		count: string;
+		fill: string;
+		gap: string;
+		span: string;
+		rule: {
+			color: string;
+			style: string;
+			width: string;
+		}
+	}
+
+	contain: string;
+	containIntrinsicBlockSize: string;
+	containIntrinsicHeight: string;
+	containIntrinsicInlineSize: string;
+	containIntrinsicWidth: string;
+
+	container: string;
+	containerName: string;
+	containerType: string;
+
+	content: string;
+	contentVisibility: string;
+
+	counter: {
+		increment: string;
+		reset: string;
+		set: string;
+	}
+
+	cursor: string;
+	direction: string;
+	display: string;
+	dominantBaseline: string;
+	emptyCells: string;
+	filter: string;
+
+	flex: {
+		grow: string;
+		shrink: string;
+		basis: string;
+		//flow: string;
+		direction: string;
+		wrap: string;
+	}
+
+	float: string;
+	floodColor: string;
+	floodOpacity: string;
+
+	font: Font;
+
+	forcedColorAdjust: string;
+	gap:			string;
+
+	grid: 			Grid;
+
+	hyphenateCharacter: string;
+	hyphens:		string;
+	imageRendering: string;
+
+	inset:			Edges<string>;
+	isolation:		string;
+	letterSpacing:	string;
+	lightingColor:	string;
+	lineBreak:		string;
+	lineHeight:		string;
+
+	list: {
+		style: 		string;
+		image: 		string;
+		position: 	string;
+		type: 		string;
+	}
+
+	margin: Edges<string>;
+
+	mask: {
+		clip: 		string;
+		composite: 	string;
+		image: 		string;
+		mode: 		string;
+		origin: 	string;
+		position: 	string;
+		repeat: 	string;
+		size: 		string;
+	}
+
+	mathDepth: string;
+	mathStyle: string;
+	maxBlockSize: string;
+
+	max: Size<string>;
+	min: Size<string>;
+
+	mixBlendMode: string;
+	objectFit: string;
+	objectPosition: string;
+
+	offset: {
+		anchor: 	string;
+		distance: 	string;
+		path: 		string;
+		position: 	string;
+		rotate: 	string;
+	}
+
+	opacity: string;
+	order: string;
+	orphans: string;
+
+	outline: WidthStyleColor<string> & {
+		offset: string
+	}
+
+	overflow: Position<string> & {
+		anchor: 	string;
+		clipMargin: string;
+		wrap: 		string;
+	}
+	overscrollBehavior:	Position<string>;
+
+	padding: Edges<string>;
+
+	page: 		string;
+	paintOrder: string;
+
+	perspective: string;
+	perspectiveOrigin: string;
+
+	//placeContent: string;	align/justify content
+	//placeItems: string;	align/justify items
+	//placeSelf: string;	align/justify self
+
+	pointerEvents: string;
+	position: string;
+
+	printColorAdjust: string;
+	quotes: string;
+	resize: string;
+	//rotate: string;
+	rowGap: string;
+
+	rubyAlign: string;
+	rubyPosition: string;
+	//scale: string;
+
+	scroll: {
+		behavior: string;
+		margin: Edges<string>;
+		padding: Edges<string>;
+		snapAlign: string;
+		snapStop: string;
+		snapType: string;
+		barColor: string;
+		barGutter: string;
+		barWidth: string;
+	}
+
+	shape: {
+		imageThreshold: string;
+		margin: 		string;
+		outside: 		string;
+		rendering: 		string;
+	}
+
+	stopColor:		string;
+	stopOpacity:	string;
+
+	stroke: {
+		dasharray: 	string;
+		dashoffset: string;
+		linecap: 	string;
+		linejoin: 	string;
+		miterlimit: string;
+		opacity: 	string;
+		width: 		string;
+	}
+
+	tabSize:		string;
+	tableLayout:	string;
+
+	text: {
+		align: 					string;
+		alignLast: 				string;
+		anchor: 				string;
+		box: 					string;
+		boxEdge: 				string;
+		boxTrim: 				string;
+		combineUpright: 		string;
+		decoration: 			string;
+		decorationColor: 		string;
+		decorationLine: 		string;
+		decorationSkipInk: 		string;
+		decorationStyle: 		string;
+		decorationThickness: 	string;
+		emphasis: 				string;
+		emphasisColor: 			string;
+		emphasisPosition: 		string;
+		emphasisStyle: 			string;
+		indent: 				string;
+		orientation: 			string;
+		overflow: 				string;
+		rendering: 				string;
+		shadow: 				string;
+		transform: 				string;
+		underlineOffset: 		string;
+		underlinePosition: 		string;
+		wrap: 					string;
+		wrapMode: 				string;
+		wrapStyle: 				string;
+	}
+
+	touchAction: string;
+
+	transform: 			string;
+	transformBox:		string;
+	transformOrigin: 	string;
+	transformStyle: 	string;
+
+	transition: {
+		behavior: 		string;
+		delay: 			string;
+		duration: 		string;
+		property: 		string;
+		timingFunction: string;
+	}
+
+	unicodeBidi: string;
+	userSelect: string;
+	verticalAlign: string;
+	viewTransitionClass: string;
+	viewTransitionName: string;
+	visibility: string;
+
+	whiteSpace: string;
+	whiteSpaceCollapse: string;
+	widows: string;
+	willChange: string;
+	wordBreak: string;
+	wordSpacing: string;
+	writingMode: string;
+	zIndex: string;
+	zoom: string;
+
+	svgOverride: {
+		cx: string;
+		cy: string;
+		rx: string;
+		ry: string;
+		r: string;
+		fill: string;
+		fillOpacity: string;
+		fillRule: string;
+		colorInterpolation: string;
+		colorInterpolationFilters: string;
+		d: string;
+		maskType: 		string;
+		clipPath: string;
+		clipRule: string;
+
+		marker: string;
+		markerEnd: string;
+		markerMid: string;
+		markerStart: string;
+		vectorEffect: string;
+
+	}
+}
+
+function getEdges(sleft: string, sright: string, stop: string, sbottom: string) {
+	const [left, right, top, bottom] = [sleft, sright, stop, sbottom].map(f => parseFloat(f) || 0);
+	return {left, right, top, bottom};
+}
+
+export function getPadding(style: CSSStyleDeclaration) {
+	return getEdges(
+		style.paddingLeft,
+		style.paddingRight,
+		style.paddingTop,
+		style.paddingBottom
+	);
+}
+export function getMargin(style: CSSStyleDeclaration) {
+	return getEdges(
+		style.marginLeft,
+		style.marginRight,
+		style.marginTop,
+		style.marginBottom
+	);
+}
+export function getBorder(style: CSSStyleDeclaration) {
+	return getEdges(
+		style.borderLeftWidth,
+		style.borderRightWidth,
+		style.borderTopWidth,
+		style.borderBottomWidth
+	);
+}
+
+export function getMarginAndBorder(element: Element) {
+	const style = window.getComputedStyle(element);
+	return {
+		margin: getMargin(style),
+		border: getBorder(style)
+	};
+}
+
+
+//-------------------------------------
+// Pool
+//-------------------------------------
 
 export class Pool<T extends Element> {
 	private pool: T[]	= [];
@@ -138,7 +637,7 @@ export class Splitter {
 // Scrollbar
 //-------------------------------------
 
-interface Container {
+export interface Container {
 	clientOffset:	number;			//pixel offset for top of track
 	clientPixels:	number;			//pixel size of track
 	clientSize:		number;			//unit size of visible region
@@ -147,7 +646,7 @@ interface Container {
 //	setScroll(x: 	number): void;	//set scroll position in units
 }
 
-function VScrollContainer(container: HTMLElement, offset = 0): Container {
+export function VScrollContainer(container: HTMLElement, offset = 0): Container {
 	return {
 		clientOffset: 		Math.max(container.clientTop, 0) + offset,
 		get clientPixels() 	{ return container.clientHeight - offset; },
@@ -158,7 +657,7 @@ function VScrollContainer(container: HTMLElement, offset = 0): Container {
 	};
 }
 
-function HScrollContainer(container: HTMLElement, offset = 0): Container {
+export function HScrollContainer(container: HTMLElement, offset = 0): Container {
 	return {
 		clientOffset: 		Math.max(container.clientLeft, 0) + offset,
 		get clientPixels() 	{ return container.clientWidth - offset; },

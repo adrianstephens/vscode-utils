@@ -1,10 +1,10 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 
-import { generateSelector } from './shared';
+import { generateSelector } from './shared.js';
 
 export class Tree {
-	constructor(public root: HTMLElement, notify:(caret:Element, down:boolean)=>void) {
+	constructor(public root: HTMLElement, public notify:(caret:Element, down:boolean)=>void) {
 		this.root = root;
 
 		root.querySelectorAll('.caret').forEach(caret => {
@@ -16,6 +16,19 @@ export class Tree {
 				}
 			});
 		});
+	}
+
+	fixup(element: Element) {
+		element.querySelectorAll('.caret').forEach(caret => {
+			caret.addEventListener('click', event => {
+				if (event.target === caret) {
+					caret.classList.toggle('caret-down');
+					this.notify(caret, caret.classList.contains('caret-down'));
+					event.stopPropagation();
+				}
+			});
+		});
+
 	}
 
 	open(element: Element) {

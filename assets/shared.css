@@ -65,6 +65,15 @@ body {
 	-ms-user-select: none;
 }
 
+[icon*="\00eb19 "]::before {
+    animation: codicon-spin 1.5s linear infinite;
+}
+
+@keyframes codicon-spin {
+    to { transform: rotate(360deg); }
+}
+
+
 /* For img icons (img in --icon)*/
 .icon::before {
     content: '';
