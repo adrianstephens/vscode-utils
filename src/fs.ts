@@ -1,18 +1,16 @@
-import * as vscode from 'vscode';
 import * as nodefs from 'fs';
 import * as path from 'path';
-import {Uri} from 'vscode';
+import {Uri, Disposable, ExtensionContext, EventEmitter, FileType, FilePermission, FileStat, workspace as vscodeWorkspace, FileChangeEvent, FileSystemProvider, FileSystemWatcher, RelativePattern} from 'vscode';
 
-
-export type Filename = string | vscode.Uri;
+export type Filename = string | Uri;
 export interface FileRange { fromOffset: number; toOffset: number; }
 
 function uri(value: Filename) : Uri {
-	return value instanceof vscode.Uri ? value : vscode.Uri.file(value);
+	return value instanceof Uri ? value : Uri.file(value);
 }
 
 function file(value: Filename) : string {
-	return value instanceof vscode.Uri ? value.fsPath : value;
+	return value instanceof Uri ? value.fsPath : value;
 }
 
 function file_id(value: Filename) : string {
@@ -35,7 +33,7 @@ function pathComponents(value: Filename) {
 
 function withPathComponents(value: Filename, ...comp: string[]) : Filename {
 	const p = path.join(...comp);
-	return value instanceof vscode.Uri ? value.with({path: p}) : p;
+	return value instanceof Uri ? value.with({path: p}) : p;
 }
 
 function join(directory: Filename, ...comp: string[]) : Filename {
@@ -56,39 +54,39 @@ export function isFile(obj: any): obj is File {
 	return obj && typeof obj.dispose === 'function' && typeof obj.read === 'function' && typeof obj.write === 'function';
 }
 
-interface FileSystem extends vscode.FileSystemProvider {
-	openFile(uri: vscode.Uri): File | Promise<File>;
+interface FileSystem extends FileSystemProvider {
+	openFile(uri: Uri): File | Promise<File>;
 }
 const filesystems: Record<string,FileSystem> = {};
 
 export abstract class BaseFileSystem implements FileSystem {
-	protected _onDidChangeFile = new vscode.EventEmitter<vscode.FileChangeEvent[]>();
+	protected _onDidChangeFile = new EventEmitter<FileChangeEvent[]>();
 
-    constructor(context: vscode.ExtensionContext, scheme: string) {
+    constructor(context: ExtensionContext, scheme: string) {
         filesystems[scheme] = this;
-		context.subscriptions.push(vscode.workspace.registerFileSystemProvider(scheme, this, { isCaseSensitive: true }));
+		context.subscriptions.push(vscodeWorkspace.registerFileSystemProvider(scheme, this, { isCaseSensitive: true }));
     }
 
 	get onDidChangeFile() { return this._onDidChangeFile.event; }
 	
     // Abstract method that must be implemented
-    abstract openFile(uri: vscode.Uri): File | Promise<File>;
-    abstract readFile(uri: vscode.Uri): Uint8Array | Thenable<Uint8Array>;
+    abstract openFile(uri: Uri): File | Promise<File>;
+    abstract readFile(uri: Uri): Uint8Array | Thenable<Uint8Array>;
 
 	//stubs
-	watch(_uri: vscode.Uri, _options: { readonly recursive: boolean; readonly excludes: readonly string[]; }): vscode.Disposable { throw 'not implemented'; }
-	stat(_uri: vscode.Uri): vscode.FileStat | Thenable<vscode.FileStat> { throw 'not implemented'; }
-	readDirectory(_uri: vscode.Uri): [string, vscode.FileType][] { throw 'not implemented'; }
-	createDirectory(_uri: vscode.Uri)  { throw 'not implemented'; }
-	writeFile(_uri: vscode.Uri, _content: Uint8Array, _options: { readonly create: boolean; readonly overwrite: boolean; })  { throw 'not implemented'; }
-	delete(_uri: vscode.Uri, _options: { readonly recursive: boolean; }): void  { throw 'not implemented'; }
-	rename(_oldUri: vscode.Uri, _newUri: vscode.Uri, _options: { readonly overwrite: boolean; })  { throw 'not implemented'; }
+	watch(_uri: Uri, _options: { readonly recursive: boolean; readonly excludes: readonly string[]; }): Disposable { throw 'not implemented'; }
+	stat(_uri: Uri): FileStat | Thenable<FileStat> { throw 'not implemented'; }
+	readDirectory(_uri: Uri): [string, FileType][] { throw 'not implemented'; }
+	createDirectory(_uri: Uri)  { throw 'not implemented'; }
+	writeFile(_uri: Uri, _content: Uint8Array, _options: { readonly create: boolean; readonly overwrite: boolean; })  { throw 'not implemented'; }
+	delete(_uri: Uri, _options: { readonly recursive: boolean; }): void  { throw 'not implemented'; }
+	rename(_oldUri: Uri, _newUri: Uri, _options: { readonly overwrite: boolean; })  { throw 'not implemented'; }
 }
 
 export function withOffset(file: File, offset: FileRange) : File;
-export function withOffset(file: vscode.Uri, offset: FileRange): vscode.Uri;
-export function withOffset(file: File|vscode.Uri, offset: FileRange) : File | vscode.Uri {
-	if (file instanceof vscode.Uri)
+export function withOffset(file: Uri, offset: FileRange): Uri;
+export function withOffset(file: File|Uri, offset: FileRange) : File | Uri {
+	if (file instanceof Uri)
 		return SubfileFileSystem.makeUri(file, offset);
 
 	return new class implements File {
@@ -107,7 +105,7 @@ export function withOffset(file: File|vscode.Uri, offset: FileRange) : File | vs
 	};
 }
 
-export function openFile(uri: vscode.Uri) {
+export function openFile(uri: Uri) {
 	switch (uri.scheme) {
 		case 'file':
 			return NormalFile.open(uri);
@@ -119,7 +117,7 @@ export function openFile(uri: vscode.Uri) {
 export class NormalFile implements File {
 	constructor(public fd:number) {}
 
-	static open(uri: vscode.Uri) {
+	static open(uri: Uri) {
 		return new Promise<NormalFile>((resolve, reject) => {
 			nodefs.open(uri.fsPath, 'r', (err, fd) => {
 				if (err)
@@ -155,42 +153,42 @@ export class NormalFile implements File {
 	}
 }
 
-function getEncapsulatedUri(uri: vscode.Uri) {
+function getEncapsulatedUri(uri: Uri) {
 	return uri.with({
 		scheme: uri.authority,
 		authority: '',
 	});
-//	return vscode.Uri.parse(uri.fsPath);
+//	return Uri.parse(uri.fsPath);
 }
 
 export class ReadOnlyFilesystem extends BaseFileSystem {
 	static SCHEME = 'readonly';
 
-	constructor(context: vscode.ExtensionContext) {
+	constructor(context: ExtensionContext) {
 		super(context, ReadOnlyFilesystem.SCHEME);
 	}
-	async stat(uri: vscode.Uri) {
-		return {...await vscode.workspace.fs.stat(getEncapsulatedUri(uri)), permissions: vscode.FilePermission.Readonly};
+	async stat(uri: Uri) {
+		return {...await vscodeWorkspace.fs.stat(getEncapsulatedUri(uri)), permissions: FilePermission.Readonly};
 	}
-	openFile(uri: vscode.Uri) {
+	openFile(uri: Uri) {
 		return openFile(getEncapsulatedUri(uri));
 	}
-	readFile(uri: vscode.Uri) {
-		return vscode.workspace.fs.readFile(getEncapsulatedUri(uri));
+	readFile(uri: Uri) {
+		return vscodeWorkspace.fs.readFile(getEncapsulatedUri(uri));
 	}
 }
 
 export class SubfileFileSystem extends BaseFileSystem {
 	static SCHEME = 'subfile';
 
-	static makeUri(uri: vscode.Uri, offset: FileRange) {
+	static makeUri(uri: Uri, offset: FileRange) {
 		return uri.with({
 			scheme: 'subfile',
 			authority: uri.scheme,
 			fragment: `${offset.fromOffset};${offset.toOffset}`
 		});
 	}
-	static parseUri(uri: vscode.Uri) {
+	static parseUri(uri: Uri) {
 		const parts = uri.fragment.split(';');
 		return {
 			uri:	getEncapsulatedUri(uri),
@@ -198,16 +196,16 @@ export class SubfileFileSystem extends BaseFileSystem {
 		};
 	}
 	
-	constructor(context: vscode.ExtensionContext) {
+	constructor(context: ExtensionContext) {
 		super(context, SubfileFileSystem.SCHEME);
 	}
 
-	async stat(uri: vscode.Uri) {
+	async stat(uri: Uri) {
 		const { uri: uri2, offset } = SubfileFileSystem.parseUri(uri);
-		return {...await vscode.workspace.fs.stat(uri2), size: offset.toOffset - offset.fromOffset};
+		return {...await vscodeWorkspace.fs.stat(uri2), size: offset.toOffset - offset.fromOffset};
 	}
 
-	async readFile(uri: vscode.Uri) {
+	async readFile(uri: Uri) {
 		const { uri: uri2, offset } = SubfileFileSystem.parseUri(uri);
 		const file = await openFile(uri2);
 		if (file) {
@@ -217,11 +215,11 @@ export class SubfileFileSystem extends BaseFileSystem {
 				file.dispose();
 			}
 		} else {
-			const data = await vscode.workspace.fs.readFile(uri2);
+			const data = await vscodeWorkspace.fs.readFile(uri2);
 			return data.subarray(offset.fromOffset, offset.toOffset);
 		}
 	}
-	async openFile(uri: vscode.Uri) {
+	async openFile(uri: Uri) {
 		const { uri: uri2, offset } = SubfileFileSystem.parseUri(uri);
 		return withOffset(await openFile(uri2), offset);
 	}
@@ -292,12 +290,12 @@ function toRegExp(pattern: string) {
 //	directory
 //-----------------------------------------------------------------------------
 
-export type Entry = [string, vscode.FileType];
+export type Entry = [string, FileType];
 
 export function readDirectory(dir: Filename) : Thenable<Entry[]> {
-	return vscode.workspace.fs.stat(uri(dir)).then(stat => {
-		if (stat.type == vscode.FileType.Directory) {
-			return vscode.workspace.fs.readDirectory(uri(dir)).then(
+	return vscodeWorkspace.fs.stat(uri(dir)).then(stat => {
+		if (stat.type == FileType.Directory) {
+			return vscodeWorkspace.fs.readDirectory(uri(dir)).then(
 				items => items,
 				error => {
 					console.log(`readDirectory failed with ${error}`);
@@ -315,18 +313,18 @@ export function readDirectory(dir: Filename) : Thenable<Entry[]> {
 }
 
 export function directories(entries: Entry[]) {
-	return entries.filter(e => e[1] == vscode.FileType.Directory).map(e => e[0]);
+	return entries.filter(e => e[1] == FileType.Directory).map(e => e[0]);
 }
 export function files(entries: Entry[], glob?: string|Glob) {
 	if (glob) {
 		const include = typeof glob === 'string' ? new Glob(glob) : glob;
-		return entries.filter(e => e[1] == vscode.FileType.File && include.test(e[0])).map(e => e[0]);
+		return entries.filter(e => e[1] == FileType.File && include.test(e[0])).map(e => e[0]);
 	} else {
-		return entries.filter(e => e[1] == vscode.FileType.File).map(e => e[0]);
+		return entries.filter(e => e[1] == FileType.File).map(e => e[0]);
 	}
 }
 
-export async function search(pattern: string, _exclude?:string | string[], want = vscode.FileType.Unknown): Promise<string[]> {
+export async function search(pattern: string, _exclude?:string | string[], want = FileType.Unknown): Promise<string[]> {
 	const m = /[*?[{}]/.exec(pattern);
 	if (!m)
 		return [pattern];
@@ -335,7 +333,7 @@ export async function search(pattern: string, _exclude?:string | string[], want 
 	const basePath	= pattern.substring(0, sep);
 	const include	= new Glob(pattern.substring(sep + 1));
 	const exclude	= _exclude ? new Glob(_exclude) : undefined;
-	const keep		= want || vscode.FileType.File;
+	const keep		= want || FileType.File;
 
 	const recurse = async (basePath: string) => {
 		const items = await readDirectory(basePath);
@@ -351,7 +349,7 @@ export async function search(pattern: string, _exclude?:string | string[], want 
 			if (i[1] === keep && include.test(filename))
 				result.push(filename);
 
-			if (i[1] == vscode.FileType.Directory)
+			if (i[1] == FileType.Directory)
 				result.push(...await recurse(filename));
 
 		}
@@ -374,46 +372,46 @@ export async function mapDirs<T>(root: string, glob: string|Glob, onFile:(filena
 //-----------------------------------------------------------------------------
 
 export function stat_reject(value: Filename) {
-	return vscode.workspace.fs.stat(uri(value));
+	return vscodeWorkspace.fs.stat(uri(value));
 }
 
 export function exists(value: Filename): Thenable<boolean> {
-	return vscode.workspace.fs.stat(uri(value)).then(
+	return vscodeWorkspace.fs.stat(uri(value)).then(
 		() => true,
 		() => false
 	);
 }
 
-export function getStat(value: Filename): Thenable<vscode.FileStat | undefined> {
-	return vscode.workspace.fs.stat(uri(value)).then(stat => stat, () => undefined);
+export function getStat(value: Filename): Thenable<FileStat | undefined> {
+	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat, () => undefined);
 }
 
 export function isDirectory(value: Filename): Thenable<boolean> {
-	return vscode.workspace.fs.stat(uri(value)).then(stat => stat.type == vscode.FileType.Directory, () => ext(value) === "");
+	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat.type == FileType.Directory, () => ext(value) === "");
 }
 
 export async function loadFile(file: Filename): Promise<Uint8Array|void> {
-	return vscode.workspace.fs.readFile(uri(file)).then(
+	return vscodeWorkspace.fs.readFile(uri(file)).then(
 		bytes	=> bytes,
 		error	=> console.log(`Failed to load ${file} : ${error}`)
 	);
 }
 
 export function writeFile(file: Filename, bytes: Uint8Array) {
-	return vscode.workspace.fs.writeFile(uri(file), bytes).then(
+	return vscodeWorkspace.fs.writeFile(uri(file), bytes).then(
 		()		=> true,
 		error	=> (console.log(`Failed to save ${file} : ${error}`), false)
 	);
 }
 
 export function deleteFile(file: Filename) {
-	return vscode.workspace.fs.delete(uri(file)).then(
+	return vscodeWorkspace.fs.delete(uri(file)).then(
 		()		=> true,
 		error	=> (console.log(`Failed to delete ${file} : ${error}`), false)
 	);
 }
 export function createDirectory(path: Filename) {
-	return vscode.workspace.fs.createDirectory(uri(path)).then(
+	return vscodeWorkspace.fs.createDirectory(uri(path)).then(
 		()		=> true,
 		error	=> (console.log(`Failed to create ${path} : ${error}`), false)
 	);
@@ -424,7 +422,7 @@ export function createDirectory(path: Filename) {
 //-----------------------------------------------------------------------------
 
 export async function createNewName(filepath: string): Promise<string>;
-export async function createNewName(filepath: vscode.Uri): Promise<vscode.Uri>;
+export async function createNewName(filepath: Uri): Promise<Uri>;
 export async function createNewName(filepath: Filename): Promise<Filename> {
 	const parsed = pathComponents(filepath);
 	let counter = 0;
@@ -450,14 +448,14 @@ async function createCopyName(filepath: Filename): Promise<Filename> {
 }
 
 export async function copyFile(sourcepath: string, destpath: string): Promise<void> {
-	return vscode.workspace.fs.readFile(uri(sourcepath)).then(async bytes => vscode.workspace.fs.writeFile(uri(destpath), bytes));
+	return vscodeWorkspace.fs.readFile(uri(sourcepath)).then(async bytes => vscodeWorkspace.fs.writeFile(uri(destpath), bytes));
 }
 
 export async function copyFileToDir(sourcepath: Filename, destdir: Filename): Promise<Filename> {
 	const dest		= createCopyName(join(destdir, basename(sourcepath)));
-	const bytes 	= await vscode.workspace.fs.readFile(uri(sourcepath));
+	const bytes 	= await vscodeWorkspace.fs.readFile(uri(sourcepath));
 	const destpath	= await dest;
-	vscode.workspace.fs.writeFile(uri(destpath), bytes);
+	vscodeWorkspace.fs.writeFile(uri(destpath), bytes);
 	return destpath;
 }
 
@@ -468,7 +466,7 @@ export async function copyDirectory(sourcepath: Filename, targetpath: Filename):
 	let result: Filename[] = [];
 	for (const i of dir) {
 		const sourcepath2 = join(sourcepath, i[0]);
-		if (i[1] === vscode.FileType.Directory)
+		if (i[1] === FileType.Directory)
 			result = [...result, ...await copyDirectory(sourcepath2, await dest)];
 		else
 			result.push(await copyFileToDir(sourcepath2, await dest));
@@ -490,8 +488,8 @@ export const Change = {
 type Callback		= (path: string, mode: number)=>void;
 type GlobCallback	= [Glob, Callback];
 
-const recWatchers:		Record<string, vscode.FileSystemWatcher> = {};
-const dirWatchers:		Record<string, vscode.FileSystemWatcher> = {};
+const recWatchers:		Record<string, FileSystemWatcher> = {};
+const dirWatchers:		Record<string, FileSystemWatcher> = {};
 const fileModTimes:		Record<number, string> = {};
 const recCallbacks:		Record<string, Callback[]> = {};
 const dirCallbacks:		Record<string, GlobCallback[]> = {};
@@ -583,13 +581,13 @@ export function onChange(filename: Filename, func: (path: string, mode: number)=
 					delete dirWatchers[i];
 				}
 			}
-			watcher 	= vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(withPathComponents(fulluri, dir), "**/*.*"));
+			watcher 	= vscodeWorkspace.createFileSystemWatcher(new RelativePattern(withPathComponents(fulluri, dir), "**/*.*"));
 			watcher.onDidChange((uri: Uri) => recCallback(uri, Change.changed));
 			watcher.onDidCreate((uri: Uri) => recCallback(uri, Change.created));
 			watcher.onDidDelete((uri: Uri) => recCallback(uri, Change.deleted));
 			recWatchers[dir] = watcher;
 		} else {
-			watcher	= vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(withPathComponents(fulluri, dir), "*.*"));
+			watcher	= vscodeWorkspace.createFileSystemWatcher(new RelativePattern(withPathComponents(fulluri, dir), "*.*"));
 			watcher.onDidChange((uri: Uri) => dirCallback(uri, Change.changed));
 			watcher.onDidCreate((uri: Uri) => dirCallback(uri, Change.created));
 			watcher.onDidDelete((uri: Uri) => dirCallback(uri, Change.deleted));
@@ -614,7 +612,7 @@ export function onChange(filename: Filename, func: (path: string, mode: number)=
 	}
 }
 
-export function arrayRemove<T>(array: T[], item: T) {
+export function array.remove<T>(array: T[], item: T) {
 	const index = array.indexOf(item);
 	if (index === -1)
 		return false;
@@ -628,7 +626,7 @@ export function removeOnChange(filename: Filename, func: (path: string)=>void) {
 		//recursive
 		const callbacks = recCallbacks[dir];
 		if (callbacks) {
-			arrayRemove(callbacks, func);
+			array.remove(callbacks, func);
 			if (callbacks.length === 0) {
 				delete recCallbacks[dir];
 				const watcher = recWatchers[dir];
@@ -643,7 +641,7 @@ export function removeOnChange(filename: Filename, func: (path: string)=>void) {
 			//file
 			const callbacks = fileCallbacks[filename.toString()];
 			if (callbacks) {
-				arrayRemove(callbacks, func);
+				array.remove(callbacks, func);
 				if (callbacks.length)
 					return;
 				delete fileCallbacks[filename.toString()];
