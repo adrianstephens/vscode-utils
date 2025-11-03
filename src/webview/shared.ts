@@ -196,7 +196,7 @@ interface Grid {
 	columnEnd: 			string;
 }
  
-interface Style extends Position<string>, Size<string>, Edges<string> {
+export interface Style extends Position<string>, Size<string>, Edges<string> {
 	color: string;
 
 	accentColor: string;

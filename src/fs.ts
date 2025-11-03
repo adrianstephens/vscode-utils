@@ -612,7 +612,7 @@ export function onChange(filename: Filename, func: (path: string, mode: number)=
 	}
 }
 
-export function array.remove<T>(array: T[], item: T) {
+function array_remove<T>(array: T[], item: T) {
 	const index = array.indexOf(item);
 	if (index === -1)
 		return false;
@@ -626,7 +626,7 @@ export function removeOnChange(filename: Filename, func: (path: string)=>void) {
 		//recursive
 		const callbacks = recCallbacks[dir];
 		if (callbacks) {
-			array.remove(callbacks, func);
+			array_remove(callbacks, func);
 			if (callbacks.length === 0) {
 				delete recCallbacks[dir];
 				const watcher = recWatchers[dir];
@@ -641,7 +641,7 @@ export function removeOnChange(filename: Filename, func: (path: string)=>void) {
 			//file
 			const callbacks = fileCallbacks[filename.toString()];
 			if (callbacks) {
-				array.remove(callbacks, func);
+				array_remove(callbacks, func);
 				if (callbacks.length)
 					return;
 				delete fileCallbacks[filename.toString()];
