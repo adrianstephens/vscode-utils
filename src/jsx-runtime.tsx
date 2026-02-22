@@ -85,8 +85,8 @@ export function id_selector(id: string | number) {
 	return id[0] >= '0' && id[0] <= '9' ? `[id="${id}"]` : `#${id}`;
 }
 
-export function Label({id, display}: {id: string, display: string}) {
-	return <label for={id}>{display}</label>;
+export function Label({id, display, title}: {id: string, display: string, title?: string}) {
+	return <label for={id} title={title}>{display}</label>;
 }
 
 //-----------------------------------------------------------------------------

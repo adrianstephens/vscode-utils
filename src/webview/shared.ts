@@ -849,11 +849,9 @@ export function template(template: HTMLElement, parent: HTMLElement, values: Rec
 		return child;
 	});
 
-//	const parent = after.parentNode;
-//	const before = after.nextSibling;
-	const before = null;
 	for (const i of newnodes)
-		parent.insertBefore(i, before);
+		parent.insertBefore(i, null);
+	return newnodes;
 }
 
 export function generateSelector(e: Node|null) {

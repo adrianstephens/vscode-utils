@@ -26,18 +26,76 @@ function ext(value: Filename) : string {
 function dirname(value: Filename) : string {
 	return path.dirname(file(value));
 }
-
+function isAbsolute(value: Filename) : boolean {
+	return path.isAbsolute(file(value));
+}
 function pathComponents(value: Filename) {
 	return path.parse(file(value));
 }
 
-function withPathComponents(value: Filename, ...comp: string[]) : Filename {
+function withPathComponents<T extends Filename>(value: T, ...comp: string[]) : T {
 	const p = path.join(...comp);
-	return value instanceof Uri ? value.with({path: p}) : p;
+	return value instanceof Uri ? value.with({path: p}) as T : path.join(p, value) as T;
 }
 
-function join(directory: Filename, ...comp: string[]) : Filename {
+function join<T extends Filename>(directory: T, ...comp: string[]) : T {
 	return withPathComponents(directory, file(directory), ...comp);
+}
+
+//-----------------------------------------------------------------------------
+//	helpers
+//-----------------------------------------------------------------------------
+
+export function stat_reject(value: Filename) {
+	return vscodeWorkspace.fs.stat(uri(value));
+}
+
+export function exists(value: Filename): Thenable<boolean> {
+	return vscodeWorkspace.fs.stat(uri(value)).then(
+		() => true,
+		() => false
+	);
+}
+export function check_exists<T extends Filename>(value: T): Thenable<T | undefined> {
+	return vscodeWorkspace.fs.stat(uri(value)).then(
+		() => value,
+		() => undefined
+	);
+}
+
+export function getStat(value: Filename): Thenable<FileStat | undefined> {
+	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat, () => undefined);
+}
+
+export function isDirectory(value: Filename): Thenable<boolean> {
+	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat.type == FileType.Directory, () => ext(value) === "");
+}
+
+export async function loadFile(file: Filename): Promise<Uint8Array|void> {
+	return vscodeWorkspace.fs.readFile(uri(file)).then(
+		bytes	=> bytes,
+		error	=> console.log(`Failed to load ${file} : ${error}`)
+	);
+}
+
+export function writeFile(file: Filename, bytes: Uint8Array) {
+	return vscodeWorkspace.fs.writeFile(uri(file), bytes).then(
+		()		=> true,
+		error	=> (console.log(`Failed to save ${file} : ${error}`), false)
+	);
+}
+
+export function deleteFile(file: Filename) {
+	return vscodeWorkspace.fs.delete(uri(file)).then(
+		()		=> true,
+		error	=> (console.log(`Failed to delete ${file} : ${error}`), false)
+	);
+}
+export function createDirectory(path: Filename) {
+	return vscodeWorkspace.fs.createDirectory(uri(path)).then(
+		()		=> true,
+		error	=> (console.log(`Failed to create ${path} : ${error}`), false)
+	);
 }
 
 //-----------------------------------------------------------------------------
@@ -366,56 +424,20 @@ export async function mapDirs<T>(root: string, glob: string|Glob, onFile:(filena
 	
 	));
 }
+export async function searchPath<T extends Filename>(target: T, paths: string[]): Promise<T | undefined> {
+	if (isAbsolute(target))
+		return check_exists(target);
 
-//-----------------------------------------------------------------------------
-//	helpers
-//-----------------------------------------------------------------------------
+	const promises = paths.map(async i => check_exists(withPathComponents(target, i)));
 
-export function stat_reject(value: Filename) {
-	return vscodeWorkspace.fs.stat(uri(value));
+	for (const p of promises) {
+		const result = await p;
+		if (result)
+			return result;
+	}
+	return undefined;
 }
 
-export function exists(value: Filename): Thenable<boolean> {
-	return vscodeWorkspace.fs.stat(uri(value)).then(
-		() => true,
-		() => false
-	);
-}
-
-export function getStat(value: Filename): Thenable<FileStat | undefined> {
-	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat, () => undefined);
-}
-
-export function isDirectory(value: Filename): Thenable<boolean> {
-	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat.type == FileType.Directory, () => ext(value) === "");
-}
-
-export async function loadFile(file: Filename): Promise<Uint8Array|void> {
-	return vscodeWorkspace.fs.readFile(uri(file)).then(
-		bytes	=> bytes,
-		error	=> console.log(`Failed to load ${file} : ${error}`)
-	);
-}
-
-export function writeFile(file: Filename, bytes: Uint8Array) {
-	return vscodeWorkspace.fs.writeFile(uri(file), bytes).then(
-		()		=> true,
-		error	=> (console.log(`Failed to save ${file} : ${error}`), false)
-	);
-}
-
-export function deleteFile(file: Filename) {
-	return vscodeWorkspace.fs.delete(uri(file)).then(
-		()		=> true,
-		error	=> (console.log(`Failed to delete ${file} : ${error}`), false)
-	);
-}
-export function createDirectory(path: Filename) {
-	return vscodeWorkspace.fs.createDirectory(uri(path)).then(
-		()		=> true,
-		error	=> (console.log(`Failed to create ${path} : ${error}`), false)
-	);
-}
 
 //-----------------------------------------------------------------------------
 //	copy file/dir

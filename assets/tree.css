@@ -1,4 +1,7 @@
 .caret {
+	cursor: pointer;
+	user-select: none;
+
 	&::before {
 		font-family: 'codicon';
 		content: '\eab6';

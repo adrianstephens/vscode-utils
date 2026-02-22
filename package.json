@@ -1,6 +1,6 @@
 {
 	"name": "@isopodlabs/vscode_utils",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "vscode utilities",
 	"repository": {
 		"type": "git",
@@ -20,6 +20,7 @@
 	],
 	"scripts": {
 		"build": "tsc -b",
+		"watch": "tsc -watch -p ./",
 		"lint": "eslint \"src/**/*.ts\""
 	},
 	"keywords": [
