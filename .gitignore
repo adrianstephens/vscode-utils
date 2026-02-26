@@ -2,3 +2,4 @@ hidden
 node_modules
 dist
 *.tgz
+*.tsbuildinfo

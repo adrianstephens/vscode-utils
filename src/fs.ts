@@ -71,30 +71,45 @@ export function isDirectory(value: Filename): Thenable<boolean> {
 	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat.type == FileType.Directory, () => ext(value) === "");
 }
 
-export async function loadFile(file: Filename): Promise<Uint8Array|void> {
+export async function loadFile(file: Filename, log = false): Promise<Uint8Array|void> {
 	return vscodeWorkspace.fs.readFile(uri(file)).then(
 		bytes	=> bytes,
-		error	=> console.log(`Failed to load ${file} : ${error}`)
+		error	=> {
+			if (log)
+				console.log(`Failed to load ${file} : ${error}`);
+		}
 	);
 }
 
-export function writeFile(file: Filename, bytes: Uint8Array) {
+export function writeFile(file: Filename, bytes: Uint8Array, log = false) {
 	return vscodeWorkspace.fs.writeFile(uri(file), bytes).then(
 		()		=> true,
-		error	=> (console.log(`Failed to save ${file} : ${error}`), false)
+		error	=> {
+			if (log)
+				console.log(`Failed to save ${file} : ${error}`);
+			return false;
+		}
 	);
 }
 
-export function deleteFile(file: Filename) {
+export function deleteFile(file: Filename, log = false) {
 	return vscodeWorkspace.fs.delete(uri(file)).then(
 		()		=> true,
-		error	=> (console.log(`Failed to delete ${file} : ${error}`), false)
+		error	=> {
+			if (log)
+				console.log(`Failed to delete ${file} : ${error}`);
+			return false;
+		}
 	);
 }
-export function createDirectory(path: Filename) {
+export function createDirectory(path: Filename, log = false) {
 	return vscodeWorkspace.fs.createDirectory(uri(path)).then(
 		()		=> true,
-		error	=> (console.log(`Failed to create ${path} : ${error}`), false)
+		error	=> {
+			if (log)
+				console.log(`Failed to create ${path} : ${error}`);
+			return false;
+		}
 	);
 }
 
@@ -532,7 +547,7 @@ function runGlobCallbacks(callbacks: GlobCallback[]|undefined, id: string, mode:
 	}
 }
 
-async function dirCallback(uri: Uri, mode:number) {
+async function dirCallback(uri: Uri, mode: number) {
 	const id = file_id(uri);
 	switch (mode) {
 		case Change.changed:
