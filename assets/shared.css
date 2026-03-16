@@ -73,6 +73,33 @@ body {
     to { transform: rotate(360deg); }
 }
 
+/* For font icons (character in fonticon attribute)*/
+[fonticon]::before {
+	content: attr(icon);
+	font: normal normal normal 16px/1 var(--icon-font);
+	display: inline-block;
+	color: var(--icon-color);
+	text-decoration: none;
+	text-rendering: auto;
+	text-align: center;
+	vertical-align: text-top;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	user-select: none;
+	-webkit-user-select: none;
+	-ms-user-select: none;
+}
+
+/* For img icons (img in --icon)*/
+[imgicon]::before {
+    content: '';
+	display: inline-block;
+	text-decoration: none;
+	width: 16px;
+	height: 16px;
+    background-image: var(--icon);
+	margin-right: 5px;
+}
 
 /* For img icons (img in --icon)*/
 .icon::before {

@@ -486,14 +486,18 @@ function getColor(col: ColorType0) {
 	return `var(--vscode-${id.replace('.', '-')})`;
 }
 
+function iconAttributes1(icon: IconType) {
+	if (typeof icon === 'string' || icon instanceof Uri)
+		return {icon: iconAttribute(icon)};
+
+	if (icon instanceof ThemeIcon)
+		return icon.color ? {icon: codicons[icon.id], color: getColor(icon.color)} : {icon: codicons[icon.id]};
+
+	return {icon: iconAttribute(currentlyLight() ? icon.light : icon.dark)};
+}
+export function iconAttributes(icon: IconType) : ReturnType<typeof iconAttributes1>;
+export function iconAttributes(icon?: IconType) : ReturnType<typeof iconAttributes1> | undefined;
 export function iconAttributes(icon?: IconType) {
-	if (icon) {
-		if (typeof icon === 'string' || icon instanceof Uri)
-			return {icon: iconAttribute(icon)};
-
-		if (icon instanceof ThemeIcon)
-			return icon.color ? {icon: codicons[icon.id], color: getColor(icon.color)} : {icon: codicons[icon.id]};
-
-		return {icon: iconAttribute(currentlyLight() ? icon.light : icon.dark)};
-	}
+	if (icon)
+		return iconAttributes1(icon);
 }

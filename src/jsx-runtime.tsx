@@ -51,6 +51,10 @@ export namespace JSX {
 	export interface IntrinsicElements {
 		[elemName: string]: any;
 	}
+	function renderRawText(element: any, type: string): string {
+		const text = typeof element === 'number' ? element.toString() : String(element ?? '');
+		return type === 'script' ? text.replace(/<\/(script)/gi, '<\\/$1') : text;
+	}
 	export function render(element: any): string {
 		if (typeof element === 'string')
 			return element.replace(/[\\&<>]/g, match => escaped[match]);
@@ -63,9 +67,13 @@ export namespace JSX {
 	
 		const { type, props } = element;
 		const children = props.children;
-		const renderedChildren = Array.isArray(children)
-			? children.flat().map(child => render(child)).join('')
-			: render(children);
+		const renderedChildren = type === 'script' || type === 'style'
+			? (Array.isArray(children)
+				? children.flat().map(child => renderRawText(child, type)).join('')
+				: renderRawText(children, type))
+			: (Array.isArray(children)
+				? children.flat().map(child => render(child)).join('')
+				: render(children));
 		
 		return type
 			? `<${type}${renderProps(props)}>${renderedChildren}</${type}>`
@@ -138,9 +146,9 @@ export function CSPdefault(extension: Uri): CSPSource1 {
 
 function CSPFunction({csp, ...others}: {csp: CSPSource1, script?: CSPSource | CSPSources, style?: CSPSource | CSPSources, font?: CSPSource, img?: CSPSource, media?: CSPSource}) {
 	const val = (v: CSPSource1): string => 
-		  v instanceof Array ? v.map(v => val(v)).join(' ')
-		: v instanceof Uri ? v.toString(true)
-		: v instanceof Hash ? v.toValue()
+		  v instanceof Array	? v.map(v => val(v)).join(' ')
+		: v instanceof Uri 		? v.toString(true).replace(/ /g, '%20')
+		: v instanceof Hash		? v.toValue()
 		: /*typeof v === 'string' ? `'${v}` :*/ v.toString();
 
 	const resolve = (v: CSPSource, parent: CSPSource1): CSPSource1 => {

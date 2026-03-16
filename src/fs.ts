@@ -132,6 +132,8 @@ interface FileSystem extends FileSystemProvider {
 }
 const filesystems: Record<string,FileSystem> = {};
 
+type MaybeThenable<T> = T | Thenable<T>;
+
 export abstract class BaseFileSystem implements FileSystem {
 	protected _onDidChangeFile = new EventEmitter<FileChangeEvent[]>();
 
@@ -148,8 +150,8 @@ export abstract class BaseFileSystem implements FileSystem {
 
 	//stubs
 	watch(_uri: Uri, _options: { readonly recursive: boolean; readonly excludes: readonly string[]; }): Disposable { throw 'not implemented'; }
-	stat(_uri: Uri): FileStat | Thenable<FileStat> { throw 'not implemented'; }
-	readDirectory(_uri: Uri): [string, FileType][] { throw 'not implemented'; }
+	stat(_uri: Uri): MaybeThenable<FileStat> { throw 'not implemented'; }
+	readDirectory(_uri: Uri): MaybeThenable<[string, FileType][]> { throw 'not implemented'; }
 	createDirectory(_uri: Uri)  { throw 'not implemented'; }
 	writeFile(_uri: Uri, _content: Uint8Array, _options: { readonly create: boolean; readonly overwrite: boolean; })  { throw 'not implemented'; }
 	delete(_uri: Uri, _options: { readonly recursive: boolean; }): void  { throw 'not implemented'; }
