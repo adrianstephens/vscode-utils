@@ -3,6 +3,14 @@
 
 import { generateSelector } from './shared.js';
 
+export interface DragDropInterface {
+	drag(entry: HTMLElement, datatransfer: DataTransfer | null): HTMLElement | undefined;
+	drop(source: HTMLElement, target: HTMLElement, move: boolean): void;
+	end(entry: HTMLElement | undefined, event: DragEvent): void;
+	over(target: HTMLElement): HTMLElement | undefined;
+	changeDropTarget(from: HTMLElement|undefined, to: HTMLElement|undefined): void;
+}
+
 export class Tree {
 	constructor(public root: HTMLElement, public notify:(caret:Element, down:boolean)=>void) {
 		this.root = root;
@@ -59,7 +67,60 @@ export class Tree {
 	
 	lastStuck() {
 		return lastStuck(this.root);
-	}	
+	}
+
+	dragAndDrop(int: DragDropInterface) {
+		let dragging: HTMLElement | undefined;
+		let dropTarget: HTMLElement | undefined;
+		
+		function setDropTarget(target?: HTMLElement) {
+			if (dropTarget === target)
+				return;
+			int.changeDropTarget(dropTarget, target);
+			dropTarget = target;
+		}
+
+		this.root.addEventListener('dragstart', event => {
+			console.log('dragstart');
+			dragging = int.drag(event.target as HTMLElement, event.dataTransfer);
+		});
+
+		this.root.addEventListener('dragend', event => {
+			console.log('dragend');
+			int.end(dragging, event);
+			dragging = undefined;
+			setDropTarget(undefined);
+		});
+
+		this.root.addEventListener('dragover', event => {
+			console.log('dragover');
+			if (!dragging)
+				return;
+			const drop = int.over(event.target as HTMLElement);
+			if (drop) {
+				event.preventDefault();
+				if (event.dataTransfer)
+					event.dataTransfer.dropEffect = event.shiftKey ? 'move' : 'copy';
+				setDropTarget(drop);
+			}
+		});
+
+		this.root.addEventListener('dragleave', event => {
+			console.log('dragleave');
+			if (event.target === this.root) {
+				setDropTarget(undefined);
+			}
+		});
+
+		this.root.addEventListener('drop', event => {
+			console.log('drop');
+			if (!dragging)
+				return;
+			event.preventDefault();
+			int.drop(dragging, event.target as HTMLElement, event.shiftKey);
+			setDropTarget(undefined);
+		});
+	}
 }
 
 export function lastStuck(tree?: HTMLElement): HTMLElement | undefined {
@@ -98,3 +159,4 @@ export function updateStuck() {
 		prev_stuck = last_stuck;
 	}
 }
+

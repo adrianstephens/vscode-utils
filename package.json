@@ -11,7 +11,8 @@
 		"./debug": "./dist/debug.js",
 		"./icon-theme": "./dist/icon-theme.js",
 		"./jsx-runtime": "./dist/jsx-runtime.js",
-		"./codicon": "./dist/codicon.js"
+		"./codicon": "./dist/codicon.js",
+		"./webview": "./dist/webview.js"
 	},
 	"files": [
 		"dist/**/*.{js,d.ts}",

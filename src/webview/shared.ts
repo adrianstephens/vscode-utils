@@ -3,6 +3,10 @@
 
 //console.log("Hello from shared.ts!");
 
+export type MessageOut =
+	| {command: 'select', shiftKey: boolean, ctrlKey: boolean, altKey: boolean, metaKey: boolean, selector: string, text: string, [key: string]: any}
+//	| {resultId: number, result: any};
+
 declare function acquireVsCodeApi(): {
     postMessage: (message: any) => void;
     getState: () => any;
@@ -11,31 +15,67 @@ declare function acquireVsCodeApi(): {
 
 export const vscode		= acquireVsCodeApi();
 
+export function generateSelector(e: Node|null) {
+	const path: string[] = [];
+	while (e && isElement(e)) {
+		let index = 1;
+		for (let s: Element|null = e; (s = s.previousElementSibling);) {
+			if (s.tagName === e.tagName)
+				index++;
+		}
+		//const selector = e.tagName.toLowerCase() + (index > 1 ? `:nth-of-type(${index})` : '');
+		const selector = `${e.tagName.toLowerCase()}:nth-of-type(${index})`;
+		path.unshift(selector);
+		e = e.parentNode;
+	}
+	return path.join(' > ');
+}
+
+export function selectorsBetween(root: ParentNode, fromSelector: string, toSelector: string) {
+	const items = Array.from(root.querySelectorAll<HTMLElement>('.select')).filter(item => item.offsetParent !== null);
+	const from	= root.querySelector<HTMLElement>(fromSelector);
+	const to	= root.querySelector<HTMLElement>(toSelector);
+	if (!from || !to)
+		return [toSelector];
+
+	const fromIndex = items.indexOf(from);
+	const toIndex	= items.indexOf(to);
+	if (fromIndex < 0 || toIndex < 0)
+		return [toSelector];
+
+	const [start, end] = fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
+	return items.slice(start, end + 1).map(generateSelector);
+}
+
 export function fixupElements(root: ParentNode) {
 	//fix up icons in attributes
-	root.querySelectorAll('[icon]').forEach(element => {
+	root.querySelectorAll<HTMLElement>('[icon]').forEach(element => {
 		const value = element.getAttribute('icon');
 		if (value && value.includes('/')) {
 			element.removeAttribute('icon');
 			element.classList.add('icon');
-			(element as HTMLElement).style.setProperty('--icon', `url(${value})`);
+			element.style.setProperty('--icon', `url(${value})`);
 		}
 		const col = element.getAttribute('color');
 		if (col) {
 			element.removeAttribute('color');
-			(element as HTMLElement).style.setProperty('--icon-color', col);
+			element.style.setProperty('--icon-color', col);
 		}
 	});
 
 	//class 'select'
-	root.querySelectorAll('.select').forEach(item => {
-		item.addEventListener('click', event => {
+	root.querySelectorAll<HTMLElement>('.select').forEach(item => {
+		item.addEventListener('click', (event) => {
 			if (event.target === item) {
 				vscode.postMessage({
-					command: 'select',
-					selector: generateSelector(item),
-					text: item.textContent,
-					...(item as HTMLElement).dataset
+					command: 	'select',
+					shiftKey:	event.shiftKey,
+					ctrlKey: 	event.ctrlKey,
+					altKey:  	event.altKey,
+					metaKey: 	event.metaKey,
+					selector:	generateSelector(item),
+					text:    	item.textContent,
+					...item.dataset
 				});
 				event.stopPropagation();
 			}
@@ -556,7 +596,6 @@ export function getMarginAndBorder(element: Element) {
 	};
 }
 
-
 //-------------------------------------
 // Pool
 //-------------------------------------
@@ -852,20 +891,4 @@ export function template(template: HTMLElement, parent: HTMLElement, values: Rec
 	for (const i of newnodes)
 		parent.insertBefore(i, null);
 	return newnodes;
-}
-
-export function generateSelector(e: Node|null) {
-	const path: string[] = [];
-	while (e && isElement(e)) {
-		let index = 1;
-		for (let s: Element|null = e; (s = s.previousElementSibling);) {
-			if (s.tagName === e.tagName)
-				index++;
-		}
-		//const selector = e.tagName.toLowerCase() + (index > 1 ? `:nth-of-type(${index})` : '');
-		const selector = `${e.tagName.toLowerCase()}:nth-of-type(${index})`;
-		path.unshift(selector);
-		e = e.parentNode;
-	}
-	return path.join(' > ');
 }
