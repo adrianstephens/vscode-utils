@@ -5,12 +5,20 @@ interface Command    {command: string, [key: string]: any};
 interface Request<M> {command: string, [key: string]: any, result: M};
 interface Result<M>  {resultId: number, result: M};
 
-export abstract class Panel<MessageIn extends Command, MessageOut, MessageRpc extends Request<any> = never> {
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+export type RpcRequest<T extends Request<any>> = DistributiveOmit<T, 'result'>;
+export type RpcResult<A extends Request<any>, M extends RpcRequest<A>> = Extract<A, { command: M['command'] }>['result'];
+
+export abstract class Panel<
+	MessageIn extends Command,
+	MessageOut extends Command,
+	RpcOut extends Request<any> = never
+> {
 	private pending: ((message:any)=>void)[] = [];
     constructor(public readonly webviewPanel: vscode.WebviewPanel) {
 		const webview = webviewPanel.webview;
 
-        webview.onDidReceiveMessage(async (message: Result<any> | MessageIn) => {
+        webview.onDidReceiveMessage(async (message: MessageIn | Result<any>) => {
             if ('resultId' in message) {
                 const resolve = this.pending[message.resultId];
                 if (resolve) {
@@ -19,24 +27,20 @@ export abstract class Panel<MessageIn extends Command, MessageOut, MessageRpc ex
                 }
                 return;
 			}
-            this.command(message);
+			if ('requestId' in message) {
+				const result = await this.command(message);
+				this.webviewPanel.webview.postMessage({ resultId: message.requestId, result });
+				return;
+			}
+			this.command(message);
 		});
     }
-/*
-	protected async rpc1<C extends MessageRpc['command']>(message: Omit<Extract<MessageRpc, {command: C}>, 'result' | 'requestId'>) {
+
+	protected async RPC<M extends RpcRequest<RpcOut>>(message: M): Promise<RpcResult<RpcOut, M>> {
 		const requestId = this.pending.length;
-		return new Promise<Extract<MessageRpc, {command: C}>['result']>(resolve => {
+		return new Promise<RpcResult<RpcOut, M>>(resolve => {
 			this.pending[requestId] = resolve;
-			this.webviewPanel.webview.postMessage({...message, requestId});
-		});
-	}
-*/
-//	protected async rpc<M extends Request<any>>(message: Omit<M, 'result' | 'requestId'>) {
-	protected async rpc<M extends MessageRpc>(message: Omit<M, 'result' | 'requestId'>) {
-		const requestId = this.pending.length;
-		return new Promise<M['result']>(resolve => {
-			this.pending[requestId] = resolve;
-			this.webviewPanel.webview.postMessage({...message, requestId});
+			this.webviewPanel.webview.postMessage({ ...message, requestId });
 		});
 	}
 
@@ -44,6 +48,6 @@ export abstract class Panel<MessageIn extends Command, MessageOut, MessageRpc ex
 		this.webviewPanel.webview.postMessage(message);
 	}
 
-    abstract command(message: MessageIn): void;
+	abstract command(message: MessageIn): any;
 
 }

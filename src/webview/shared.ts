@@ -3,9 +3,15 @@
 
 //console.log("Hello from shared.ts!");
 
+interface Command    {command: string, [key: string]: any};
+interface Request<M> {command: string, [key: string]: any, result: M};
+interface Result<M>  {resultId: number, result: M};
+
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never;
+export type RpcMessage<M extends Request<any>> = DistributiveOmit<M, 'result'> & {requestId: number};
+
 export type MessageOut =
 	| {command: 'select', shiftKey: boolean, ctrlKey: boolean, altKey: boolean, metaKey: boolean, selector: string, text: string, [key: string]: any}
-//	| {resultId: number, result: any};
 
 declare function acquireVsCodeApi(): {
     postMessage: (message: any) => void;
@@ -13,7 +19,30 @@ declare function acquireVsCodeApi(): {
     setState: (state: any) => void;
 };
 
-export const vscode		= acquireVsCodeApi();
+export const vscode	= acquireVsCodeApi();
+export const modKey: 'altKey' | 'ctrlKey'	= navigator.platform.toLowerCase().includes("mac") ? 'altKey' : 'ctrlKey';
+export const modKey2: 'metaKey' | 'ctrlKey'	= navigator.platform.toLowerCase().includes("mac") ? 'metaKey' : 'ctrlKey';
+
+const pending: ((message:any)=>void)[] = [];
+export async function RPC<R>(message: any) {
+	const requestId = pending.length;
+	return new Promise<R>(resolve => {
+		pending[requestId] = resolve;
+		vscode.postMessage({...message, requestId});
+	});
+}
+
+export function handleResult(message: Result<any> | Command) {
+	if ('resultId' in message) {
+		const resolve = pending[message.resultId];
+		if (resolve) {
+			delete pending[message.resultId];
+			resolve(message.result);
+		}
+		return true;
+	}
+	return false;
+}
 
 export function generateSelector(e: Node|null) {
 	const path: string[] = [];
@@ -31,6 +60,54 @@ export function generateSelector(e: Node|null) {
 	return path.join(' > ');
 }
 
+export function querySelectorAll<T extends Element>(root: ParentNode, selectors: string) {
+	const children = Array.from(root.querySelectorAll<T>(selectors));
+	if (root instanceof Element && root.matches(selectors))
+		return [root as T, ...children];
+	return children;
+}
+
+//fix up icons in attributes
+export function fixupIcons(root: ParentNode) {
+	querySelectorAll<HTMLElement>(root, '[icon]').forEach(element => {
+		const value = element.getAttribute('icon');
+		if (value && value.includes('/')) {
+			element.removeAttribute('icon');
+			element.classList.add('icon');
+			element.style.setProperty('--icon', `url(${value})`);
+		}
+		const col = element.getAttribute('color');
+		if (col) {
+			element.removeAttribute('color');
+			element.style.setProperty('--icon-color', col);
+		}
+	});
+}
+
+//class 'select'
+export function postSelect(event: MouseEvent) {
+	const target = event.target as HTMLElement;
+	vscode.postMessage({
+		command: 	'select',
+		shiftKey:	event.shiftKey,
+		ctrlKey: 	event.ctrlKey,
+		altKey:  	event.altKey,
+		metaKey: 	event.metaKey,
+		selector:	generateSelector(target),
+		text:    	target.textContent,
+		...target.dataset
+	});
+}
+
+export function fixupSelect(root: ParentNode) {
+	querySelectorAll<HTMLElement>(root, '.select').forEach(item => {
+		item.addEventListener('click', event => {
+			if (event.target === item)
+				postSelect(event);
+		});
+	});
+}
+/*
 export function selectorsBetween(root: ParentNode, fromSelector: string, toSelector: string) {
 	const items = Array.from(root.querySelectorAll<HTMLElement>('.select')).filter(item => item.offsetParent !== null);
 	const from	= root.querySelector<HTMLElement>(fromSelector);
@@ -46,41 +123,10 @@ export function selectorsBetween(root: ParentNode, fromSelector: string, toSelec
 	const [start, end] = fromIndex < toIndex ? [fromIndex, toIndex] : [toIndex, fromIndex];
 	return items.slice(start, end + 1).map(generateSelector);
 }
-
+*/
 export function fixupElements(root: ParentNode) {
-	//fix up icons in attributes
-	root.querySelectorAll<HTMLElement>('[icon]').forEach(element => {
-		const value = element.getAttribute('icon');
-		if (value && value.includes('/')) {
-			element.removeAttribute('icon');
-			element.classList.add('icon');
-			element.style.setProperty('--icon', `url(${value})`);
-		}
-		const col = element.getAttribute('color');
-		if (col) {
-			element.removeAttribute('color');
-			element.style.setProperty('--icon-color', col);
-		}
-	});
-
-	//class 'select'
-	root.querySelectorAll<HTMLElement>('.select').forEach(item => {
-		item.addEventListener('click', (event) => {
-			if (event.target === item) {
-				vscode.postMessage({
-					command: 	'select',
-					shiftKey:	event.shiftKey,
-					ctrlKey: 	event.ctrlKey,
-					altKey:  	event.altKey,
-					metaKey: 	event.metaKey,
-					selector:	generateSelector(item),
-					text:    	item.textContent,
-					...item.dataset
-				});
-				event.stopPropagation();
-			}
-		});
-	});
+	fixupIcons(root);
+	fixupSelect(root);
 }
 
 fixupElements(document);
@@ -235,7 +281,7 @@ interface Grid {
 	columnStart: 		string;
 	columnEnd: 			string;
 }
- 
+/*
 export interface Style extends Position<string>, Size<string>, Edges<string> {
 	color: string;
 
@@ -557,7 +603,7 @@ export interface Style extends Position<string>, Size<string>, Edges<string> {
 
 	}
 }
-
+*/
 function getEdges(sleft: string, sright: string, stop: string, sbottom: string) {
 	const [left, right, top, bottom] = [sleft, sright, stop, sbottom].map(f => parseFloat(f) || 0);
 	return {left, right, top, bottom};
@@ -620,7 +666,6 @@ export class Pool<T extends Element> {
 		this.discard(item);
 		item.remove();
 	}
-
 }
 
 //-------------------------------------
@@ -819,6 +864,7 @@ window.addEventListener('resize', () => {
 //-------------------------------------
 // Tooltip
 //-------------------------------------
+
 export class Tooltip {
 	private element: HTMLDivElement;
 
@@ -871,6 +917,14 @@ function replace_in_element(e: HTMLElement, re: RegExp, process: (m:RegExpExecAr
 	const name = e.attributes.getNamedItem('name');
 	if (name)
 		name.value = replace(name.value, re, process);
+
+	if (e.dataset) {
+		for (const [k, v] of Object.entries(e.dataset)) {
+			if (v)
+				e.dataset[k] = replace(v, re, process);
+		}
+	}
+
 	const childNodes = e.childNodes;
 	for (const node of childNodes) {
 		if (isText(node) && node.textContent)
@@ -880,11 +934,21 @@ function replace_in_element(e: HTMLElement, re: RegExp, process: (m:RegExpExecAr
 	}
 }
 
-export function template(template: HTMLElement, parent: HTMLElement, values: Record<string, string>[]) {
+export function template(template: HTMLElement, parent: HTMLElement, values: Record<string, any>[]) {
 	const newnodes = values.map(i => {
 		const child = template.cloneNode(true) as HTMLElement;
 		child.hidden = false;
-		replace_in_element(child, /\$\((.*)\)/g, m => i[m[1]]);
+		replace_in_element(child, /\$\((.*)\)/g, m => i[m[1]].toString());
+
+		querySelectorAll<HTMLElement>(child, '[data-attrs]').forEach(el => {
+			const name = el.dataset.attrs;
+			const attrs = name && i[name];
+			if (attrs) {
+				Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, (v as any).toString()));
+				el.removeAttribute('data-attrs');
+			}
+		});
+
 		return child;
 	});
 

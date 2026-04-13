@@ -169,8 +169,8 @@ button.codicon {
     }
 }
 
-.selected {
-    background-color: var(--vscode-editor-selectionBackground);
+.selected:not(.stuck) {
+    background-color: var(--vscode-editor-selectionBackground) !important;
 }
 
 /* Splitter */

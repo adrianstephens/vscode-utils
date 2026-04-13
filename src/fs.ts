@@ -1,6 +1,8 @@
-import * as nodefs from 'fs';
+import * as fs from 'fs';
 import * as path from 'path';
 import {Uri, Disposable, ExtensionContext, EventEmitter, FileType, FilePermission, FileStat, workspace as vscodeWorkspace, FileChangeEvent, FileSystemProvider, FileSystemWatcher, RelativePattern} from 'vscode';
+
+type MaybeThenable<T> = T | Thenable<T>;
 
 export type Filename = string | Uri;
 export interface FileRange { fromOffset: number; toOffset: number; }
@@ -17,28 +19,44 @@ function file_id(value: Filename) : string {
 	return typeof(value) === 'string' ? value : value.scheme === 'file' ? value.fsPath : value.toString();
 }
 
-function basename(value: Filename) : string {
+export function basename(value: Filename) : string {
 	return path.basename(file(value));
 }
-function ext(value: Filename) : string {
+export function ext(value: Filename) : string {
 	return path.extname(file(value));
 }
-function dirname(value: Filename) : string {
-	return path.dirname(file(value));
+export function dirname(value: Filename) : string {
+	if (value instanceof Uri) {
+		let sep = value.path.lastIndexOf('/');
+		if (sep === value.path.length - 1)
+			sep = value.path.lastIndexOf('/', sep - 1);
+		return sep < 0 ? '' : value.path.slice(0, sep);
+	}
+	return path.dirname(value);
 }
-function isAbsolute(value: Filename) : boolean {
+export function isAbsolute(value: Filename) : boolean {
 	return path.isAbsolute(file(value));
 }
-function pathComponents(value: Filename) {
-	return path.parse(file(value));
+
+export function components(value: Filename) {
+	if (value instanceof Uri) {
+		return {
+			...path.parse(value.fsPath),
+			scheme:   	value.scheme,
+			authority:	value.authority,
+			query:    	value.query,
+			fragment: 	value.fragment,
+		};
+	}
+	return path.parse(value);
 }
 
-function withPathComponents<T extends Filename>(value: T, ...comp: string[]) : T {
+export function withPathComponents<T extends Filename>(value: T, ...comp: string[]) : T {
 	const p = path.join(...comp);
 	return value instanceof Uri ? value.with({path: p}) as T : path.join(p, value) as T;
 }
 
-function join<T extends Filename>(directory: T, ...comp: string[]) : T {
+export function join<T extends Filename>(directory: T, ...comp: string[]) : T {
 	return withPathComponents(directory, file(directory), ...comp);
 }
 
@@ -68,7 +86,7 @@ export function getStat(value: Filename): Thenable<FileStat | undefined> {
 }
 
 export function isDirectory(value: Filename): Thenable<boolean> {
-	return vscodeWorkspace.fs.stat(uri(value)).then(stat => stat.type == FileType.Directory, () => ext(value) === "");
+	return vscodeWorkspace.fs.stat(uri(value)).then(stat => (stat.type & FileType.Directory) !== 0, () => ext(value) === "");
 }
 
 export async function loadFile(file: Filename, log = false): Promise<Uint8Array|void> {
@@ -117,10 +135,96 @@ export function createDirectory(path: Filename, log = false) {
 //	FileSystems
 //-----------------------------------------------------------------------------
 
+export enum ExtPermission {
+	Readonly	= 1 << 0,
+	Hidden		= 1 << 1,
+	System		= 1 << 2,
+	Directory	= 1 << 4,
+	Archive	    = 1 << 5,
+
+	Sparse		= 1 << 6
+}
+
+export interface ExtStat extends FileStat {
+	atime?:		number;
+    uid?:  		number;
+    gid?:  		number;
+    uname?:		string;
+    gname?:		string;
+	link?: 		string;
+	extPermissions?: ExtPermission;
+
+	[key: string]: any
+};
+
+export interface OpenFileOptions {
+	readonly create?: boolean;
+	readonly truncate?: boolean;
+}
+
 export interface File {
 	dispose(): void;
 	read(pos: number, length: number): Promise<Uint8Array>;
 	write(pos: number, data: Uint8Array): Promise<number>;
+}
+
+
+export class BufferFile implements File {
+	constructor(public data: Uint8Array) {}
+
+	public dispose() {}
+
+	public async read(pos: number, length: number): Promise<Uint8Array> {
+		return this.data.slice(pos, pos + length);
+	}
+	public async write(pos: number, data: Uint8Array): Promise<number> {
+		this.data.set(data, pos);
+		return data.length;
+	}
+}
+
+export class NormalFile implements File {
+	constructor(public fd:number) {}
+
+	static open(uri: Uri, options?: OpenFileOptions) {
+		const O = fs.constants;
+		return new Promise<NormalFile>((resolve, reject) => {
+			fs.open(uri.fsPath,
+				  options?.truncate ? O.O_RDWR | O.O_CREAT | O.O_TRUNC
+				: options?.create ? O.O_CREAT | O.O_RDWR
+				: O.O_RDONLY,
+				(err, fd) => {
+				if (err)
+					reject(err);
+				else
+					resolve(new NormalFile(fd));
+			});
+		});
+	}
+	dispose()	{
+		fs.close(this.fd, () => {});
+	}
+	read(pos: number, length: number) {
+		return new Promise<Uint8Array>((resolve, reject) => {
+			const buffer = Buffer.alloc(length);
+			fs.read(this.fd, buffer, 0, length, pos, (err, bytesRead, buffer) => {
+				if (err)
+					reject(err);
+				else
+					resolve(new Uint8Array(buffer));
+			});
+		});
+	}
+	write(pos: number, data: Uint8Array): Promise<number> {
+		return new Promise<number>((resolve, reject) => {
+			fs.write(this.fd, data, 0, data.length, pos, (err, bytesWritten) => {
+				if (err)
+					reject(err);
+				else
+					resolve(bytesWritten);
+			});
+		});
+	}
 }
 
 export function isFile(obj: any): obj is File {
@@ -128,11 +232,11 @@ export function isFile(obj: any): obj is File {
 }
 
 interface FileSystem extends FileSystemProvider {
-	openFile(uri: Uri): File | Promise<File>;
+	openFile(uri: Uri, options?: OpenFileOptions): File | Thenable<File>;
+	setStat(uri: Uri, stat: Partial<ExtStat>): Thenable<void>;
+	stat(uri: Uri): MaybeThenable<ExtStat>;
 }
-const filesystems: Record<string,FileSystem> = {};
-
-type MaybeThenable<T> = T | Thenable<T>;
+const filesystems: Record<string, FileSystem> = {};
 
 export abstract class BaseFileSystem implements FileSystem {
 	protected _onDidChangeFile = new EventEmitter<FileChangeEvent[]>();
@@ -144,18 +248,79 @@ export abstract class BaseFileSystem implements FileSystem {
 
 	get onDidChangeFile() { return this._onDidChangeFile.event; }
 	
-    // Abstract method that must be implemented
-    abstract openFile(uri: Uri): File | Promise<File>;
     abstract readFile(uri: Uri): Uint8Array | Thenable<Uint8Array>;
 
 	//stubs
 	watch(_uri: Uri, _options: { readonly recursive: boolean; readonly excludes: readonly string[]; }): Disposable { throw 'not implemented'; }
-	stat(_uri: Uri): MaybeThenable<FileStat> { throw 'not implemented'; }
+	stat(_uri: Uri): MaybeThenable<ExtStat> { throw 'not implemented'; }
 	readDirectory(_uri: Uri): MaybeThenable<[string, FileType][]> { throw 'not implemented'; }
 	createDirectory(_uri: Uri)  { throw 'not implemented'; }
 	writeFile(_uri: Uri, _content: Uint8Array, _options: { readonly create: boolean; readonly overwrite: boolean; })  { throw 'not implemented'; }
 	delete(_uri: Uri, _options: { readonly recursive: boolean; }): void  { throw 'not implemented'; }
 	rename(_oldUri: Uri, _newUri: Uri, _options: { readonly overwrite: boolean; })  { throw 'not implemented'; }
+	setStat(_uri: Uri, _stat: Partial<ExtStat>): Thenable<void> { throw 'not implemented'; }
+    openFile(uri: Uri, _options?: OpenFileOptions): File | Thenable<File> {
+		const data = this.readFile(uri);
+		if (data instanceof Uint8Array)
+			return new BufferFile(data);
+
+		return data.then(data => new BufferFile(data));
+	}
+}
+
+interface Watcher {
+	exclude: Glob;
+}
+
+class PathWatchers {
+	watchers: Watcher[] = [];
+	add(watcher: Watcher) {
+		this.watchers.push(watcher);
+	}
+	remove(watcher: Watcher) {
+		const index = this.watchers.indexOf(watcher);
+		if (index !== -1)
+			this.watchers.splice(index, 1);
+	}
+	check(rest: string): boolean {
+		return this.watchers.some(w => !w.exclude.test(rest));
+	}
+}
+
+export class FileSystemWatchers {
+	watchers: Record<string, PathWatchers> = {};
+	recursive: Record<string, PathWatchers> = {};
+
+	add(path: string, options: {
+		readonly recursive: boolean;
+		readonly excludes: readonly string[];
+	}): Disposable {
+		const w		= {exclude: new Glob(options.excludes)};
+		const loc	= (options.recursive ? this.recursive : this.watchers)[path] ??= new PathWatchers;
+		loc.add(w);
+		return {
+			dispose() {
+				loc.remove(w);
+			}
+		};
+	}
+	check(path: string) {
+		let sep = path.lastIndexOf('/');
+		if (sep !== -1) {
+			const notify = this.watchers[path.substring(0, sep)]?.check(path.substring(sep + 1));
+			if (notify)
+				return true;
+		}
+
+		for (; sep !== -1; sep = path.lastIndexOf('/', sep - 1)) {
+			const notify = this.recursive[path.substring(0, sep)]?.check(path.substring(sep + 1));
+			if (notify)
+				return true;
+		}
+
+		return this.recursive['']?.check(path) ?? false;
+	}
+
 }
 
 export function withOffset(file: File, offset: FileRange) : File;
@@ -163,7 +328,7 @@ export function withOffset(file: Uri, offset: FileRange): Uri;
 export function withOffset(file: File|Uri, offset: FileRange) : File | Uri {
 	if (file instanceof Uri)
 		return SubfileFileSystem.makeUri(file, offset);
-
+	
 	return new class implements File {
 		length = offset.toOffset - offset.fromOffset;
 		dispose() { file.dispose(); }
@@ -180,52 +345,34 @@ export function withOffset(file: File|Uri, offset: FileRange) : File | Uri {
 	};
 }
 
-export function openFile(uri: Uri) {
+export function openFile(uri: Uri, options?: OpenFileOptions) {
 	switch (uri.scheme) {
 		case 'file':
-			return NormalFile.open(uri);
+			return NormalFile.open(uri, options);
 		default:
-			return filesystems[uri.scheme]?.openFile(uri);
+			return filesystems[uri.scheme]?.openFile(uri, options);
 	}
 }
 
-export class NormalFile implements File {
-	constructor(public fd:number) {}
+export async function stat(uri: Uri): Promise<ExtStat> {
+	const fs1 = filesystems[uri.scheme];
+	if (fs1)
+		return fs1.stat(uri);
 
-	static open(uri: Uri) {
-		return new Promise<NormalFile>((resolve, reject) => {
-			nodefs.open(uri.fsPath, 'r', (err, fd) => {
-				if (err)
-					reject(err);
-				else
-					resolve(new NormalFile(fd));
-			});
-		});
+	let stat = (await vscodeWorkspace.fs.stat(uri)) as ExtStat;
+	if (uri.scheme === 'file') {
+		if (stat.type & FileType.SymbolicLink)
+			stat.link = await fs.promises.readlink(uri.fsPath);
+		return fs.promises.access(uri.fsPath, fs.constants.W_OK).then(
+			() => stat,
+			() => ({...stat, permissions: FilePermission.Readonly})
+		);
 	}
-	dispose()	{
-		nodefs.close(this.fd);
-	}
-	read(pos: number, length: number) {
-		return new Promise<Uint8Array>((resolve, reject) => {
-			const buffer = Buffer.alloc(length);
-			nodefs.read(this.fd, buffer, 0, length, pos, (err, bytesRead, buffer) => {
-				if (err)
-					reject(err);
-				else
-					resolve(new Uint8Array(buffer));
-			});
-		});
-	}
-	write(pos: number, data: Uint8Array): Promise<number> {
-		return new Promise<number>((resolve, reject) => {
-			nodefs.write(this.fd, data, 0, data.length, pos, (err, bytesWritten) => {
-				if (err)
-					reject(err);
-				else
-					resolve(bytesWritten);
-			});
-		});
-	}
+	return stat;
+}
+
+export function setStat(uri: Uri, stat: Partial<FileStat>) {
+	return filesystems[uri.scheme]?.setStat(uri, stat);
 }
 
 function getEncapsulatedUri(uri: Uri) {
@@ -277,7 +424,7 @@ export class SubfileFileSystem extends BaseFileSystem {
 
 	async stat(uri: Uri) {
 		const { uri: uri2, offset } = SubfileFileSystem.parseUri(uri);
-		return {...await vscodeWorkspace.fs.stat(uri2), size: offset.toOffset - offset.fromOffset};
+		return {...await stat(uri2), size: offset.toOffset - offset.fromOffset};
 	}
 
 	async readFile(uri: Uri) {
@@ -307,12 +454,12 @@ export class SubfileFileSystem extends BaseFileSystem {
 export class Glob {
 	private readonly regexp: RegExp;
 
-	constructor(pattern: string | string[]) {
+	constructor(pattern: string | readonly string[]) {
 		if (typeof pattern === 'string' && pattern.includes(';'))
 			pattern = pattern.split(';');
-		const re = Array.isArray(pattern)
-			? '(' + pattern.map(s => toRegExp(s)).join('|') + ')'
-			: toRegExp(pattern);
+		const re = typeof pattern === 'string'
+				? toRegExp(pattern)
+				: '(' + pattern.map(s => toRegExp(s)).join('|') + ')';
 		this.regexp = new RegExp(re + '$');
 	}
 	public test(input: string): boolean {
@@ -369,7 +516,7 @@ export type Entry = [string, FileType];
 
 export function readDirectory(dir: Filename) : Thenable<Entry[]> {
 	return vscodeWorkspace.fs.stat(uri(dir)).then(stat => {
-		if (stat.type == FileType.Directory) {
+		if (stat.type & FileType.Directory) {
 			return vscodeWorkspace.fs.readDirectory(uri(dir)).then(
 				items => items,
 				error => {
@@ -388,14 +535,14 @@ export function readDirectory(dir: Filename) : Thenable<Entry[]> {
 }
 
 export function directories(entries: Entry[]) {
-	return entries.filter(e => e[1] == FileType.Directory).map(e => e[0]);
+	return entries.filter(e => (e[1] & FileType.Directory) !== 0).map(e => e[0]);
 }
 export function files(entries: Entry[], glob?: string|Glob) {
 	if (glob) {
 		const include = typeof glob === 'string' ? new Glob(glob) : glob;
-		return entries.filter(e => e[1] == FileType.File && include.test(e[0])).map(e => e[0]);
+		return entries.filter(e => (e[1] & FileType.File) !== 0 && include.test(e[0])).map(e => e[0]);
 	} else {
-		return entries.filter(e => e[1] == FileType.File).map(e => e[0]);
+		return entries.filter(e => (e[1] & FileType.File) !== 0).map(e => e[0]);
 	}
 }
 
@@ -414,17 +561,17 @@ export async function search(pattern: string, _exclude?:string | string[], want 
 		const items = await readDirectory(basePath);
 		const result: string[] = [];
 		for (const i of items) {
-			if (want && i[1] !== want)
+			if (want && (i[1] & want) === 0)
 				continue;
 
 			const filename = path.join(basePath, i[0]);
 			if (exclude && exclude.test(filename))
 				continue;
 
-			if (i[1] === keep && include.test(filename))
+			if ((i[1] & keep) !== 0 && include.test(filename))
 				result.push(filename);
 
-			if (i[1] == FileType.Directory)
+			if ((i[1] & FileType.Directory) !== 0)
 				result.push(...await recurse(filename));
 
 		}
@@ -463,7 +610,7 @@ export async function searchPath<T extends Filename>(target: T, paths: string[])
 export async function createNewName(filepath: string): Promise<string>;
 export async function createNewName(filepath: Uri): Promise<Uri>;
 export async function createNewName(filepath: Filename): Promise<Filename> {
-	const parsed = pathComponents(filepath);
+	const parsed = components(filepath);
 	let counter = 0;
 	const m = /\d+$/.exec(parsed.name);
 	if (m) {
@@ -477,7 +624,7 @@ export async function createNewName(filepath: Filename): Promise<Filename> {
 }
 
 async function createCopyName(filepath: Filename): Promise<Filename> {
-	const parsed = pathComponents(filepath);
+	const parsed = components(filepath);
 	let counter = 1;
 	while (await exists(filepath)) {
 		filepath = withPathComponents(filepath, parsed.dir, `${parsed.name} copy${(counter > 1 ? ' ' + counter : '')}${parsed.ext}`);
