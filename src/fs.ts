@@ -132,27 +132,25 @@ export function createDirectory(path: Filename, log = false) {
 }
 
 //-----------------------------------------------------------------------------
-//	FileSystems
+//	FileSystems (extension of vscode.FileSystemProvider)
 //-----------------------------------------------------------------------------
 
 export enum ExtPermission {
-	Readonly	= 1 << 0,
-	Hidden		= 1 << 1,
-	System		= 1 << 2,
-	Directory	= 1 << 4,
-	Archive	    = 1 << 5,
-
-	Sparse		= 1 << 6
+	Readonly	= FilePermission.Readonly,
+	Hidden		= 1 << 8,
+	System		= 1 << 9,
+	Archive	    = 1 << 11,
+	Sparse		= 1 << 12,
 }
 
-export interface ExtStat extends FileStat {
+export interface ExtStat extends Omit<FileStat, 'permissions'> {
+	permissions?:	number;
 	atime?:		number;
     uid?:  		number;
     gid?:  		number;
     uname?:		string;
     gname?:		string;
 	link?: 		string;
-	extPermissions?: ExtPermission;
 
 	[key: string]: any
 };
@@ -160,6 +158,7 @@ export interface ExtStat extends FileStat {
 export interface OpenFileOptions {
 	readonly create?: boolean;
 	readonly truncate?: boolean;
+	readonly shared?: boolean;
 }
 
 export interface File {
@@ -168,85 +167,92 @@ export interface File {
 	write(pos: number, data: Uint8Array): Promise<number>;
 }
 
-
-export class BufferFile implements File {
-	constructor(public data: Uint8Array) {}
-
-	public dispose() {}
-
-	public async read(pos: number, length: number): Promise<Uint8Array> {
-		return this.data.slice(pos, pos + length);
-	}
-	public async write(pos: number, data: Uint8Array): Promise<number> {
-		this.data.set(data, pos);
-		return data.length;
-	}
-}
-
-export class NormalFile implements File {
-	constructor(public fd:number) {}
-
-	static open(uri: Uri, options?: OpenFileOptions) {
-		const O = fs.constants;
-		return new Promise<NormalFile>((resolve, reject) => {
-			fs.open(uri.fsPath,
-				  options?.truncate ? O.O_RDWR | O.O_CREAT | O.O_TRUNC
-				: options?.create ? O.O_CREAT | O.O_RDWR
-				: O.O_RDONLY,
-				(err, fd) => {
-				if (err)
-					reject(err);
-				else
-					resolve(new NormalFile(fd));
-			});
-		});
-	}
-	dispose()	{
-		fs.close(this.fd, () => {});
-	}
-	read(pos: number, length: number) {
-		return new Promise<Uint8Array>((resolve, reject) => {
-			const buffer = Buffer.alloc(length);
-			fs.read(this.fd, buffer, 0, length, pos, (err, bytesRead, buffer) => {
-				if (err)
-					reject(err);
-				else
-					resolve(new Uint8Array(buffer));
-			});
-		});
-	}
-	write(pos: number, data: Uint8Array): Promise<number> {
-		return new Promise<number>((resolve, reject) => {
-			fs.write(this.fd, data, 0, data.length, pos, (err, bytesWritten) => {
-				if (err)
-					reject(err);
-				else
-					resolve(bytesWritten);
-			});
-		});
-	}
-}
-
 export function isFile(obj: any): obj is File {
 	return obj && typeof obj.dispose === 'function' && typeof obj.read === 'function' && typeof obj.write === 'function';
 }
 
-interface FileSystem extends FileSystemProvider {
+export interface FileSystem extends FileSystemProvider {
 	openFile(uri: Uri, options?: OpenFileOptions): File | Thenable<File>;
 	setStat(uri: Uri, stat: Partial<ExtStat>): Thenable<void>;
 	stat(uri: Uri): MaybeThenable<ExtStat>;
 }
-const filesystems: Record<string, FileSystem> = {};
+
+const filesystems: Record<string, FileSystem> = {
+file: {
+	//this is just for the extra functionality, the actual file operations are done by vscode's file system provider
+	onDidChangeFile: null as any,
+	watch(_uri: Uri, _options: { readonly recursive: boolean; readonly excludes: readonly string[]; }): Disposable { throw 'not implemented'; },
+	readDirectory(_uri: Uri): MaybeThenable<[string, FileType][]> { throw 'not implemented'; },
+	createDirectory(_uri: Uri)  { throw 'not implemented'; },
+	writeFile(_uri: Uri, _content: Uint8Array, _options: { readonly create: boolean; readonly overwrite: boolean; })  { throw 'not implemented'; },
+	delete(_uri: Uri, _options: { readonly recursive: boolean; }): void  { throw 'not implemented'; },
+	rename(_oldUri: Uri, _newUri: Uri, _options: { readonly overwrite: boolean; })  { throw 'not implemented'; },
+	readFile(_uri: Uri): Uint8Array { throw 'not implemented'; },
+
+	async stat(uri: Uri) {
+		const native = await fs.promises.lstat(uri.fsPath);
+		const stat: ExtStat = {
+			type:	(native.isDirectory() ? FileType.Directory : FileType.File) | (native.isSymbolicLink() ? FileType.SymbolicLink : 0),
+			ctime:	native.ctimeMs,
+			mtime:	native.mtimeMs,
+			size:	native.size,
+			atime:	native.atimeMs,
+			uid:	native.uid,
+			gid:	native.gid,
+		};
+
+		if (native.isSymbolicLink())
+			stat.link = await fs.promises.readlink(uri.fsPath);
+
+		let permissions = 0;
+		if (basename(uri).startsWith('.'))
+			permissions |= ExtPermission.Hidden;
+		if (native.blocks * 512 < native.size)
+			permissions |= ExtPermission.Sparse;
+		if (await fs.promises.access(uri.fsPath, fs.constants.W_OK).then(() => false, () => true))
+			permissions |= ExtPermission.Readonly;
+
+		stat.permissions = permissions;
+		return stat;
+	},
+	async setStat(uri: Uri, stat: Partial<ExtStat>) {
+		const current = await fs.promises.stat(uri.fsPath);
+		const updates: Promise<any>[] = [];
+
+		if (stat.atime !== undefined || stat.mtime !== undefined) {
+			updates.push(fs.promises.utimes(
+				uri.fsPath,
+				stat.atime !== undefined ? new Date(stat.atime) : current.atime,
+				stat.mtime !== undefined ? new Date(stat.mtime) : current.mtime,
+			));
+		}
+
+		if (stat.permissions !== undefined) {
+			const mode = stat.permissions & FilePermission.Readonly ? (current.mode & ~0o222) : (current.mode | 0o200);
+			updates.push(fs.promises.chmod(uri.fsPath, mode));
+		}
+
+		if ((stat.uid !== undefined || stat.gid !== undefined) && process.platform !== 'win32')
+			updates.push(fs.promises.chown(uri.fsPath, stat.uid ?? current.uid, stat.gid ?? current.gid));
+
+		await Promise.all(updates);
+	},
+	openFile(uri: Uri, options?: OpenFileOptions) {
+		if (options?.shared)
+			return SharedFile.open(uri, options);
+		return NormalFile.open(uri, options);
+	},
+}
+};
 
 export abstract class BaseFileSystem implements FileSystem {
 	protected _onDidChangeFile = new EventEmitter<FileChangeEvent[]>();
+	get onDidChangeFile() { return this._onDidChangeFile.event; }
 
     constructor(context: ExtensionContext, scheme: string) {
         filesystems[scheme] = this;
 		context.subscriptions.push(vscodeWorkspace.registerFileSystemProvider(scheme, this, { isCaseSensitive: true }));
     }
-
-	get onDidChangeFile() { return this._onDidChangeFile.event; }
 	
     abstract readFile(uri: Uri): Uint8Array | Thenable<Uint8Array>;
 
@@ -267,6 +273,10 @@ export abstract class BaseFileSystem implements FileSystem {
 		return data.then(data => new BufferFile(data));
 	}
 }
+
+//-----------------------------------------------------------------------------
+//	FileSystems Helpers
+//-----------------------------------------------------------------------------
 
 interface Watcher {
 	exclude: Glob;
@@ -323,57 +333,21 @@ export class FileSystemWatchers {
 
 }
 
-export function withOffset(file: File, offset: FileRange) : File;
-export function withOffset(file: Uri, offset: FileRange): Uri;
-export function withOffset(file: File|Uri, offset: FileRange) : File | Uri {
-	if (file instanceof Uri)
-		return SubfileFileSystem.makeUri(file, offset);
-	
-	return new class implements File {
-		length = offset.toOffset - offset.fromOffset;
-		dispose() { file.dispose(); }
-		read(pos: number, length: number) {
-			const start = pos + offset.fromOffset;
-			const end	= Math.min(start + length, offset.toOffset);
-			return file.read(start, end - start);
-		}
-		write(pos: number, data: Uint8Array) {
-			const start = pos + offset.fromOffset;
-			const end	= Math.min(start + data.length, offset.toOffset);
-			return file.write(start, data.subarray(0, end - start));
-		}
-	};
-}
-
 export function openFile(uri: Uri, options?: OpenFileOptions) {
-	switch (uri.scheme) {
-		case 'file':
-			return NormalFile.open(uri, options);
-		default:
-			return filesystems[uri.scheme]?.openFile(uri, options);
-	}
+	return filesystems[uri.scheme]?.openFile(uri, options);
 }
 
 export async function stat(uri: Uri): Promise<ExtStat> {
-	const fs1 = filesystems[uri.scheme];
-	if (fs1)
-		return fs1.stat(uri);
-
-	let stat = (await vscodeWorkspace.fs.stat(uri)) as ExtStat;
-	if (uri.scheme === 'file') {
-		if (stat.type & FileType.SymbolicLink)
-			stat.link = await fs.promises.readlink(uri.fsPath);
-		return fs.promises.access(uri.fsPath, fs.constants.W_OK).then(
-			() => stat,
-			() => ({...stat, permissions: FilePermission.Readonly})
-		);
-	}
-	return stat;
+	return filesystems[uri.scheme]?.stat(uri) ?? vscodeWorkspace.fs.stat(uri);
 }
 
-export function setStat(uri: Uri, stat: Partial<FileStat>) {
+export function setStat(uri: Uri, stat: Partial<ExtStat>) {
 	return filesystems[uri.scheme]?.setStat(uri, stat);
 }
+
+//-----------------------------------------------------------------------------
+//	FileSystem implementations
+//-----------------------------------------------------------------------------
 
 function getEncapsulatedUri(uri: Uri) {
 	return uri.with({
@@ -444,6 +418,136 @@ export class SubfileFileSystem extends BaseFileSystem {
 	async openFile(uri: Uri) {
 		const { uri: uri2, offset } = SubfileFileSystem.parseUri(uri);
 		return withOffset(await openFile(uri2), offset);
+	}
+}
+
+export function withOffset(file: File, offset: FileRange) : File;
+export function withOffset(file: Uri, offset: FileRange): Uri;
+export function withOffset(file: File|Uri, offset: FileRange) : File | Uri {
+	if (file instanceof Uri)
+		return SubfileFileSystem.makeUri(file, offset);
+	
+	return new class implements File {
+		length = offset.toOffset - offset.fromOffset;
+		dispose() { file.dispose(); }
+		read(pos: number, length: number) {
+			const start = pos + offset.fromOffset;
+			const end	= Math.min(start + length, offset.toOffset);
+			return file.read(start, end - start);
+		}
+		write(pos: number, data: Uint8Array) {
+			const start = pos + offset.fromOffset;
+			const end	= Math.min(start + data.length, offset.toOffset);
+			return file.write(start, data.subarray(0, end - start));
+		}
+	};
+}
+//-----------------------------------------------------------------------------
+//	File implementations
+//-----------------------------------------------------------------------------
+
+export class BufferFile implements File {
+	constructor(public data: Uint8Array) {}
+
+	public dispose() {}
+
+	public async read(pos: number, length: number): Promise<Uint8Array> {
+		return this.data.slice(pos, pos + length);
+	}
+	public async write(pos: number, data: Uint8Array): Promise<number> {
+		this.data.set(data, pos);
+		return data.length;
+	}
+}
+
+function getFlags(options?: OpenFileOptions) {
+	const O = fs.constants;
+	const flags = options?.truncate ? O.O_RDWR | O.O_CREAT | O.O_TRUNC
+			: options?.create ? O.O_CREAT | O.O_RDWR
+			: O.O_RDONLY;
+	return flags;
+}
+
+
+export class NormalFile implements File {
+	constructor(public fd:number) {}
+
+	static open(uri: Uri, options?: OpenFileOptions) {
+		return new Promise<NormalFile>((resolve, reject) => {
+			fs.open(uri.fsPath, getFlags(options), (err, fd) => {
+				if (err)
+					reject(err);
+				else
+					resolve(new NormalFile(fd));
+			});
+		});
+	}
+	dispose()	{
+		fs.close(this.fd, () => {});
+	}
+	read(pos: number, length: number) {
+		return new Promise<Uint8Array>((resolve, reject) => {
+			const buffer = Buffer.alloc(length);
+			fs.read(this.fd, buffer, 0, length, pos, (err, bytesRead, buffer) => {
+				if (err)
+					reject(err);
+				else
+					resolve(new Uint8Array(buffer));
+			});
+		});
+	}
+	write(pos: number, data: Uint8Array): Promise<number> {
+		return new Promise<number>((resolve, reject) => {
+			fs.write(this.fd, data, 0, data.length, pos, (err, bytesWritten) => {
+				if (err)
+					reject(err);
+				else
+					resolve(bytesWritten);
+			});
+		});
+	}
+}
+
+export class SharedFile implements File {
+	private handle: fs.promises.FileHandle | null = null;
+	private timeout: NodeJS.Timeout | null = null;
+
+	static open(uri: Uri, options?: OpenFileOptions) {
+		return new SharedFile(uri, getFlags(options));
+	}
+
+	constructor(private uri: Uri, private flags: number) {}
+
+	private async open() {
+		if (this.timeout)
+			clearTimeout(this.timeout);
+		if (!this.handle)
+			this.handle = await fs.promises.open(this.uri.fsPath, this.flags);
+		this.timeout = setTimeout(() => this.close(), 100);
+		return this.handle;
+	}
+	private async close() {
+		if (this.handle) {
+			await this.handle.close();
+			this.handle = null;
+		}
+	}
+	dispose()	{
+		this.close();
+		if (this.timeout) {
+			clearTimeout(this.timeout);
+			this.timeout = null;
+		}
+	}
+	async read(pos: number, length: number) {
+		const buffer = Buffer.alloc(length);
+		await this.open().then(h => h.read(buffer, 0, length, pos));
+		return new Uint8Array(buffer);
+	}
+	async write(pos: number, data: Uint8Array): Promise<number> {
+		const buffer = Buffer.from(data);
+		const { bytesWritten } = await this.open().then(h => h.write(buffer, 0, buffer.length, pos));
+		return bytesWritten;
 	}
 }
 

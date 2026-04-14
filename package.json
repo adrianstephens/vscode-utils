@@ -1,6 +1,6 @@
 {
 	"name": "@isopodlabs/vscode_utils",
-	"version": "0.6.1",
+	"version": "0.6.2",
 	"description": "vscode utilities",
 	"repository": {
 		"type": "git",
