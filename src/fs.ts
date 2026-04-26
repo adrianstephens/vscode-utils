@@ -191,19 +191,6 @@ file: {
 
 	async stat(uri: Uri) {
 		const native = await fs.promises.lstat(uri.fsPath);
-		const stat: ExtStat = {
-			type:	(native.isDirectory() ? FileType.Directory : FileType.File) | (native.isSymbolicLink() ? FileType.SymbolicLink : 0),
-			ctime:	native.ctimeMs,
-			mtime:	native.mtimeMs,
-			size:	native.size,
-			atime:	native.atimeMs,
-			uid:	native.uid,
-			gid:	native.gid,
-		};
-
-		if (native.isSymbolicLink())
-			stat.link = await fs.promises.readlink(uri.fsPath);
-
 		let permissions = 0;
 		if (basename(uri).startsWith('.'))
 			permissions |= ExtPermission.Hidden;
@@ -212,7 +199,20 @@ file: {
 		if (await fs.promises.access(uri.fsPath, fs.constants.W_OK).then(() => false, () => true))
 			permissions |= ExtPermission.Readonly;
 
-		stat.permissions = permissions;
+		const stat: ExtStat = {
+			type:	(native.isDirectory() ? FileType.Directory : FileType.File) | (native.isSymbolicLink() ? FileType.SymbolicLink : 0),
+			ctime:	native.ctimeMs,
+			mtime:	native.mtimeMs,
+			size:	native.size,
+			atime:	native.atimeMs,
+			uid:	native.uid,
+			gid:	native.gid,
+			permissions,
+		};
+
+		if (native.isSymbolicLink())
+			stat.link = await fs.promises.readlink(uri.fsPath);
+
 		return stat;
 	},
 	async setStat(uri: Uri, stat: Partial<ExtStat>) {
@@ -237,10 +237,14 @@ file: {
 
 		await Promise.all(updates);
 	},
-	openFile(uri: Uri, options?: OpenFileOptions) {
+	async openFile(uri: Uri, options?: OpenFileOptions) {
+		const O		= fs.constants;
+		const flags	= options?.truncate ? O.O_RDWR | O.O_CREAT | O.O_TRUNC : options?.create ? O.O_CREAT | O.O_RDWR : O.O_RDONLY;
+
 		if (options?.shared)
-			return SharedFile.open(uri, options);
-		return NormalFile.open(uri, options);
+			return new SharedFile(uri.fsPath, flags);
+		
+		return new NormalFile(await fs.promises.open(uri.fsPath, flags));
 	},
 }
 };
@@ -449,87 +453,52 @@ export function withOffset(file: File|Uri, offset: FileRange) : File | Uri {
 export class BufferFile implements File {
 	constructor(public data: Uint8Array) {}
 
-	public dispose() {}
+	dispose() {}
 
-	public async read(pos: number, length: number): Promise<Uint8Array> {
+	async read(pos: number, length: number): Promise<Uint8Array> {
 		return this.data.slice(pos, pos + length);
 	}
-	public async write(pos: number, data: Uint8Array): Promise<number> {
+	async write(pos: number, data: Uint8Array): Promise<number> {
 		this.data.set(data, pos);
 		return data.length;
 	}
 }
 
-function getFlags(options?: OpenFileOptions) {
-	const O = fs.constants;
-	const flags = options?.truncate ? O.O_RDWR | O.O_CREAT | O.O_TRUNC
-			: options?.create ? O.O_CREAT | O.O_RDWR
-			: O.O_RDONLY;
-	return flags;
-}
-
 
 export class NormalFile implements File {
-	constructor(public fd:number) {}
-
-	static open(uri: Uri, options?: OpenFileOptions) {
-		return new Promise<NormalFile>((resolve, reject) => {
-			fs.open(uri.fsPath, getFlags(options), (err, fd) => {
-				if (err)
-					reject(err);
-				else
-					resolve(new NormalFile(fd));
-			});
-		});
-	}
+	constructor(public handle: fs.promises.FileHandle) {}
 	dispose()	{
-		fs.close(this.fd, () => {});
+		this.handle.close();
 	}
-	read(pos: number, length: number) {
-		return new Promise<Uint8Array>((resolve, reject) => {
-			const buffer = Buffer.alloc(length);
-			fs.read(this.fd, buffer, 0, length, pos, (err, bytesRead, buffer) => {
-				if (err)
-					reject(err);
-				else
-					resolve(new Uint8Array(buffer));
-			});
-		});
+	async read(pos: number, length: number) {
+		const result = await this.handle.read(Buffer.alloc(length), 0, length, pos);
+		return new Uint8Array(result.buffer);
 	}
-	write(pos: number, data: Uint8Array): Promise<number> {
-		return new Promise<number>((resolve, reject) => {
-			fs.write(this.fd, data, 0, data.length, pos, (err, bytesWritten) => {
-				if (err)
-					reject(err);
-				else
-					resolve(bytesWritten);
-			});
-		});
+	async write(pos: number, data: Uint8Array): Promise<number> {
+		const result = await this.handle.write(Buffer.from(data), 0, data.length, pos);
+		return result.bytesWritten;
 	}
 }
 
-export class SharedFile implements File {
+class SharedFile implements File {
 	private handle: fs.promises.FileHandle | null = null;
 	private timeout: NodeJS.Timeout | null = null;
 
-	static open(uri: Uri, options?: OpenFileOptions) {
-		return new SharedFile(uri, getFlags(options));
-	}
-
-	constructor(private uri: Uri, private flags: number) {}
+	constructor(private filename: string, private flags: number) {}
 
 	private async open() {
 		if (this.timeout)
 			clearTimeout(this.timeout);
 		if (!this.handle)
-			this.handle = await fs.promises.open(this.uri.fsPath, this.flags);
+			this.handle = await fs.promises.open(this.filename, this.flags);
 		this.timeout = setTimeout(() => this.close(), 100);
 		return this.handle;
 	}
 	private async close() {
 		if (this.handle) {
-			await this.handle.close();
+			const handle = this.handle;
 			this.handle = null;
+			await handle.close();
 		}
 	}
 	dispose()	{

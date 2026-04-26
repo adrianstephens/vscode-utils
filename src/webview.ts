@@ -15,6 +15,7 @@ export abstract class Panel<
 	RpcOut extends Request<any> = never
 > {
 	private pending: ((message:any)=>void)[] = [];
+
     constructor(public readonly webviewPanel: vscode.WebviewPanel) {
 		const webview = webviewPanel.webview;
 
@@ -36,7 +37,7 @@ export abstract class Panel<
 		});
     }
 
-	protected async RPC<M extends RpcRequest<RpcOut>>(message: M): Promise<RpcResult<RpcOut, M>> {
+	async RPC<M extends RpcRequest<RpcOut>>(message: M): Promise<RpcResult<RpcOut, M>> {
 		const requestId = this.pending.length;
 		return new Promise<RpcResult<RpcOut, M>>(resolve => {
 			this.pending[requestId] = resolve;
@@ -44,7 +45,7 @@ export abstract class Panel<
 		});
 	}
 
-    protected postMessage(message: MessageOut) {
+    postMessage(message: MessageOut) {
 		this.webviewPanel.webview.postMessage(message);
 	}
 

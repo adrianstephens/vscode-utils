@@ -82,10 +82,16 @@ export class Tree {
 	prev_stuck:	HTMLElement | undefined;
 
 	constructor(public root: HTMLElement, public notify:(caret:HTMLElement, down:boolean)=>void) {
+		root.addEventListener('click', event => {
+			const caret = event.target instanceof HTMLElement && event.target.classList.contains('caret') ? event.target : null;
+			if (caret)
+				this.toggle(caret);
+		});
 		this.fixup(root);
 	}
 
 	fixup(element: HTMLElement) {
+		/*
 		querySelectorAll<HTMLElement>(element, '.caret').forEach(caret =>
 			caret.addEventListener('click', event => {
 				if (event.target === caret) {
@@ -94,6 +100,7 @@ export class Tree {
 				}
 			})
 		);
+		*/
 		querySelectorAll<HTMLElement>(element, '.select').forEach(row => { row.tabIndex = -1; });
 	}
 
@@ -293,7 +300,7 @@ export function lastStuck(tree?: HTMLElement): HTMLElement | undefined {
 	let last_stuck: HTMLElement | undefined;
 	if (tree) {
 		const rect = tree.getBoundingClientRect();
-		const x = rect.right - 5; // 5px inside the tree from the left edge
+		const x = rect.right - 24; // 24px inside the tree from the right edge
 		let y = rect.top + 5;   // 5px inside the tree from the top edge
 
 		for (let i = 0; i < 100; i++) {

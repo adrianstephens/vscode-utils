@@ -31,6 +31,9 @@ export async function RPC<R>(message: any) {
 		vscode.postMessage({...message, requestId});
 	});
 }
+export function sendResult<T>(resultId: number, result?: T) {
+	vscode.postMessage({resultId, result});
+}
 
 export function handleResult(message: Result<any> | Command) {
 	if ('resultId' in message) {
